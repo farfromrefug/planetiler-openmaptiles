@@ -85,7 +85,7 @@ public class OmtLanguageUtils {
     String latin = isLatin ? name :
       Stream
         .concat(Stream.of(nameEn), getAllNameTranslationsBesidesEnglishAndGerman(tags))
-        .filter(OmtLanguageUtils::containsOnlyLatinCharacters)
+        .filter(LanguageUtils::containsOnlyLatinCharacters)
         .findFirst().orElse(null);
     if (latin == null && translations != null && translations.getShouldTransliterate()) {
       latin = transliteratedName(tags);
