@@ -39,15 +39,20 @@ import static com.onthegomap.planetiler.openmaptiles.util.Utils.coalesce;
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullIfEmpty;
 
 import com.onthegomap.planetiler.FeatureCollector;
-import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
+import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
 import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
 import com.onthegomap.planetiler.openmaptiles.generated.Tables;
+import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
 import com.onthegomap.planetiler.util.Translations;
 import com.onthegomap.planetiler.util.ZoomFunction;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -61,7 +66,8 @@ import java.util.Set;
 public class Landuse implements
   OpenMapTilesSchema.Landuse,
   OpenMapTilesProfile.NaturalEarthProcessor,
-  Tables.OsmLandusePolygon.Handler {
+  Tables.OsmLandusePolygon.Handler,
+  ForwardingProfile.FeaturePostProcessor {
 
   private static final ZoomFunction<Number> MIN_PIXEL_SIZE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
     13, 4,
@@ -75,38 +81,58 @@ public class Landuse implements
     FieldValues.CLASS_NEIGHBOURHOOD
   );
 
-  public Landuse(Translations translations, PlanetilerConfig config, Stats stats) {}
+  private final PlanetilerConfig config;
+  
+  public Landuse(Translations translations, PlanetilerConfig config, Stats stats) {
+    this.config = config;
+  }
 
   @Override
   public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
     if ("ne_50m_urban_areas".equals(table)) {
       Double scalerank = Parse.parseDoubleOrNull(feature.getTag("scalerank"));
-      if (scalerank != null && scalerank <= 2) {
-        features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-          .setAttr(Fields.CLASS, FieldValues.CLASS_RESIDENTIAL)
-          .setZoomRange(4, 5);
-      }
+      // if (scalerank != null && scalerank <= 2) {
+      features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+        .setAttr(Fields.CLASS, FieldValues.CLASS_RESIDENTIAL)
+        .setZoomRange(scalerank != null && scalerank <= 2 ? 4 : 5, 5);
+      // }
     }
   }
 
-  @Override
-  public void process(Tables.OsmLandusePolygon element, FeatureCollector features) {
+  public static String getClass(Tables.OsmLandusePolygon element) {
     String clazz = coalesce(
       nullIfEmpty(element.landuse()),
       nullIfEmpty(element.amenity()),
       nullIfEmpty(element.leisure()),
       nullIfEmpty(element.tourism()),
       nullIfEmpty(element.place()),
-      nullIfEmpty(element.waterway())
+      nullIfEmpty(element.waterway()),
+      nullIfEmpty(element.highway())
     );
     if (clazz != null) {
       if ("grave_yard".equals(clazz)) {
         clazz = FieldValues.CLASS_CEMETERY;
       }
+    }
+    return clazz;
+  }
+
+  @Override
+  public void process(Tables.OsmLandusePolygon element, FeatureCollector features) {
+    String clazz = getClass(element);
+    if (clazz != null) {
       features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .setAttr(Fields.CLASS, clazz)
+        .setSimplifyUsingVW(true)
+        .setPixelToleranceFactor(2.2)
+        // .setMinPixelSizeFactor(2.5)
         .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(Z6_CLASSES.contains(clazz) ? 6 : 9);
     }
+  }
+
+  @Override
+  public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) throws GeometryException {
+    return items.size() > 1 ? FeatureMerge.mergeOverlappingPolygons(items, config.minFeatureSize(zoom)) : items;
   }
 }

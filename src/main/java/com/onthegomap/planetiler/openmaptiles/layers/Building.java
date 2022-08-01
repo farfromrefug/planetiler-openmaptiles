@@ -36,6 +36,7 @@ See https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md for deta
 package com.onthegomap.planetiler.openmaptiles.layers;
 
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.coalesce;
+import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullIfInt;
 import static com.onthegomap.planetiler.util.MemoryEstimator.CLASS_HEADER_BYTES;
 import static com.onthegomap.planetiler.util.Parse.parseDoubleOrNull;
 import static java.util.Map.entry;
@@ -43,11 +44,11 @@ import static java.util.Map.entry;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
-import com.onthegomap.planetiler.config.PlanetilerConfig;
-import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
 import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
 import com.onthegomap.planetiler.openmaptiles.generated.Tables;
+import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.osm.OsmElement;
 import com.onthegomap.planetiler.reader.osm.OsmRelationInfo;
 import com.onthegomap.planetiler.stats.Stats;
@@ -107,7 +108,7 @@ public class Building implements
     this.mergeZ13Buildings = config.arguments().getBoolean(
       "building_merge_z13",
       "building layer: merge nearby buildings at z13",
-      true
+      false
     );
   }
 
@@ -160,12 +161,19 @@ public class Building implements
 
     if (renderHeight < 3660 && renderMinHeight < 3660) {
       var feature = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-        .setMinZoom(13)
-        .setMinPixelSize(2)
-        .setAttrWithMinzoom(Fields.RENDER_HEIGHT, renderHeight, 14)
-        .setAttrWithMinzoom(Fields.RENDER_MIN_HEIGHT, renderMinHeight, 14)
-        .setAttrWithMinzoom(Fields.COLOUR, color, 14)
+        .setMinZoom(this.mergeZ13Buildings ? 13 : 14)
+        // .setMinPixelSize(2)
+        .setAttrWithMinzoom(Fields.RENDER_HEIGHT, nullIfInt(renderHeight, 5), 14)
+        .setAttrWithMinzoom(Fields.RENDER_MIN_HEIGHT, nullIfInt(renderMinHeight, 0), 14)
+        // .setAttrWithMinzoom(Fields.COLOUR, color, 14)
+        .setSimplifyUsingVW(true)
+        // .setPixelToleranceAtMaxZoom(256d / 4096 * 1.5)
         .setAttrWithMinzoom(Fields.HIDE_3D, hide3d, 14)
+        // .setAttrWithMinzoom("amenity", nullIfEmpty(element.amenity()), 14)
+        // .setAttrWithMinzoom("shop", nullIfEmpty(element.shop()), 14)
+        // .setAttrWithMinzoom("tourism", nullIfEmpty(element.tourism()), 14)
+        // .setAttrWithMinzoom("leisure", nullIfEmpty(element.leisure()), 14)
+        // .setAttrWithMinzoom("aerialway", nullIfEmpty(element.aerialway()), 14)
         .setSortKey(renderHeight);
       if (mergeZ13Buildings) {
         feature

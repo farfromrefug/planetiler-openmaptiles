@@ -80,7 +80,7 @@ public class WaterName implements
    */
 
   private static final Logger LOGGER = LoggerFactory.getLogger(WaterName.class);
-  private static final double WORLD_AREA_FOR_70K_SQUARE_METERS =
+  private static final double WORLD_AREA_FOR_4K_SQUARE_METERS =
     Math.pow(GeoUtils.metersToPixelAtEquator(0, Math.sqrt(70_000)) / 256d, 2);
   private static final double LOG2 = Math.log(2);
   private final Translations translations;
@@ -124,7 +124,9 @@ public class WaterName implements
       }
     }
   }
-
+  private String getMarinePointName(String name) {
+    return name.replaceAll("\\s+", " ").trim().toLowerCase();
+  }
   @Override
   public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
     // use natural earth named polygons just as a source of name to zoom-level mappings for later
@@ -132,7 +134,7 @@ public class WaterName implements
       String name = feature.getString("name");
       Integer scalerank = Parse.parseIntOrNull(feature.getTag("scalerank"));
       if (name != null && scalerank != null) {
-        name = name.replaceAll("\\s+", " ").trim().toLowerCase();
+        name = getMarinePointName(name);
         importantMarinePoints.put(name, scalerank);
       }
     }
@@ -145,13 +147,13 @@ public class WaterName implements
       var source = element.source();
       // use name from OSM, but get min zoom from natural earth based on fuzzy name match...
       Integer rank = Parse.parseIntOrNull(source.getTag("rank"));
-      String name = element.name().toLowerCase();
+      String name = getMarinePointName(element.name());
       Integer nerank;
       if ((nerank = importantMarinePoints.get(name)) != null) {
         rank = nerank;
-      } else if ((nerank = importantMarinePoints.get(source.getString("name:en", "").toLowerCase())) != null) {
+      } else if ((nerank = importantMarinePoints.get(getMarinePointName(source.getString("name:en", "")))) != null) {
         rank = nerank;
-      } else if ((nerank = importantMarinePoints.get(source.getString("name:es", "").toLowerCase())) != null) {
+      } else if ((nerank = importantMarinePoints.get(getMarinePointName(source.getString("name:es", "")))) != null) {
         rank = nerank;
       } else {
         Map.Entry<String, Integer> next = importantMarinePoints.ceilingEntry(name);
@@ -164,36 +166,38 @@ public class WaterName implements
         .setBufferPixels(BUFFER_SIZE)
         .putAttrs(OmtLanguageUtils.getNames(source.tags(), translations))
         .setAttr(Fields.CLASS, place)
-        .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : 0)
+        .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
         .setMinZoom(minZoom);
     }
   }
 
   @Override
   public void process(Tables.OsmWaterPolygon element, FeatureCollector features) {
-    if (nullIfEmpty(element.name()) != null) {
+    if (nullIfEmpty(element.name()) != null && !element.source().hasTag("amenity")) {
       try {
         Geometry centerlineGeometry = lakeCenterlines.get(element.source().id());
-        FeatureCollector.Feature feature;
+        FeatureCollector.Feature feature = null;
         int minzoom = 9;
+        Geometry geometry = element.source().worldGeometry();
+        double area = geometry.getArea();
+        minzoom = (int) Math.floor(20 - Math.log(area / WORLD_AREA_FOR_4K_SQUARE_METERS) / LOG2);
+        minzoom = Math.min(14, Math.max(4, minzoom));
         if (centerlineGeometry != null) {
           // prefer lake centerline if it exists
           feature = features.geometry(LAYER_NAME, centerlineGeometry)
             .setMinPixelSizeBelowZoom(13, 6d * element.name().length());
-        } else {
+        } else if (!"riverbank".equals(element.waterway()) && !"river".equals(element.water())) {
           // otherwise just use a label point inside the lake
           feature = features.pointOnSurface(LAYER_NAME);
-          Geometry geometry = element.source().worldGeometry();
-          double area = geometry.getArea();
-          minzoom = (int) Math.floor(20 - Math.log(area / WORLD_AREA_FOR_70K_SQUARE_METERS) / LOG2);
-          minzoom = Math.min(14, Math.max(9, minzoom));
         }
-        feature
+        if (feature != null) {
+          feature
           .setAttr(Fields.CLASS, FieldValues.CLASS_LAKE)
           .setBufferPixels(BUFFER_SIZE)
           .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-          .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : 0)
+          .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
           .setMinZoom(minzoom);
+        }
       } catch (GeometryException e) {
         e.log(stats, "omt_water_polygon", "Unable to get geometry for water polygon " + element.source().id());
       }

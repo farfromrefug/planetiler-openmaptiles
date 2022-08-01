@@ -35,24 +35,24 @@ See https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md for deta
 */
 package com.onthegomap.planetiler.openmaptiles.layers;
 
-import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.coalesce;
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullIfEmpty;
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullOrEmpty;
+import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 
 import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
+import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
+import com.onthegomap.planetiler.openmaptiles.generated.Tables;
+import com.onthegomap.planetiler.openmaptiles.util.OmtLanguageUtils;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.PointIndex;
 import com.onthegomap.planetiler.geo.PolygonIndex;
-import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
-import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
-import com.onthegomap.planetiler.openmaptiles.generated.Tables;
-import com.onthegomap.planetiler.openmaptiles.util.OmtLanguageUtils;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
@@ -229,9 +229,6 @@ public class Place implements
       var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
 
       if (country != null) {
-        if (nullOrEmpty(names.get(Fields.NAME_EN))) {
-          names.put(Fields.NAME_EN, country.name);
-        }
         rank = country.rank;
       }
 
@@ -258,16 +255,14 @@ public class Place implements
       NaturalEarthRegion state = states.getOnlyContaining(element.source().worldGeometry().getCentroid());
       if (state != null) {
         var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
-        if (nullOrEmpty(names.get(Fields.NAME_EN))) {
-          names.put(Fields.NAME_EN, state.name);
-        }
-        int rank = Math.min(6, Math.max(1, state.rank));
 
+        int rank = Math.min(6, Math.max(1, state.rank));
+        int minzoom = rank == 1 ? 2 : Math.max(3, rank - 1);
         features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
           .putAttrs(names)
           .setAttr(Fields.CLASS, element.place())
           .setAttr(Fields.RANK, rank)
-          .setMinZoom(2)
+          .setMinZoom(minzoom)
           .setSortKey(rank);
       }
     } catch (GeometryException e) {
@@ -281,7 +276,7 @@ public class Place implements
     try {
       double area = element.source().area();
       int rank = ISLAND_AREA_RANKS.ceilingEntry(area).getValue();
-      int minzoom = rank <= 3 ? 8 : rank <= 4 ? 9 : 10;
+      int minzoom = 3 + rank;
 
       features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
@@ -316,13 +311,11 @@ public class Place implements
         List<NaturalEarthPoint> neCities = cities.getWithin(point, CITY_JOIN_DISTANCE);
         String rawName = coalesce(element.name(), "");
         String name = coalesce(rawName, "").toLowerCase(Locale.ROOT);
-        String nameEn = coalesce(element.nameEn(), "").toLowerCase(Locale.ROOT);
         String normalizedName = StringUtils.stripAccents(rawName);
         String wikidata = element.source().getString("wikidata", "");
         for (var neCity : neCities) {
           if (wikidata.equals(neCity.wikidata) ||
             neCity.names.contains(name) ||
-            neCity.names.contains(nameEn) ||
             normalizedName.equals(neCity.name)) {
             rank = neCity.scaleRank <= 5 ? neCity.scaleRank + 1 : neCity.scaleRank;
             break;

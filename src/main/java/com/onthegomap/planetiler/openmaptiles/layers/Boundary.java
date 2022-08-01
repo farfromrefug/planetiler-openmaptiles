@@ -45,12 +45,12 @@ import com.carrotsearch.hppc.LongObjectMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
+import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
-import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
-import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
 import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.reader.osm.OsmElement;
@@ -169,7 +169,7 @@ public class Boundary implements
         new BoundaryInfo(2, 4, 4);
       case "ne_10m_admin_1_states_provinces_lines" -> {
         Double minZoom = Parse.parseDoubleOrNull(feature.getTag("min_zoom"));
-        yield minZoom != null && minZoom <= 7 ? new BoundaryInfo(4, 1, 4) :
+        yield minZoom != null && minZoom <= 7 ? new BoundaryInfo(4, 2, 4) :
           minZoom != null && minZoom <= 7.7 ? new BoundaryInfo(4, 4, 4) :
           null;
       }
@@ -180,8 +180,9 @@ public class Boundary implements
         .setZoomRange(info.minzoom, info.maxzoom)
         .setMinPixelSizeAtAllZooms(0)
         .setAttr(Fields.ADMIN_LEVEL, info.adminLevel)
-        .setAttr(Fields.MARITIME, 0)
-        .setAttr(Fields.DISPUTED, disputed ? 1 : 0);
+        // .setPixelToleranceFactor(0.5)
+        // .setAttr(Fields.MARITIME, 0)
+        .setAttr(Fields.DISPUTED, disputed ? 1 : null);
     }
   }
 
@@ -192,7 +193,7 @@ public class Boundary implements
       relation.hasTag("boundary", "administrative")) {
       Integer adminLevelValue = Parse.parseRoundInt(relation.getTag("admin_level"));
       String code = relation.getString("ISO3166-1:alpha3");
-      if (adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 10) {
+      if (adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 6) {
         boolean disputed = isDisputed(relation.tags());
         if (code != null) {
           regionNames.put(relation.id(), code);
@@ -238,7 +239,7 @@ public class Boundary implements
         }
       }
 
-      if (minAdminLevel <= 10) {
+      if (minAdminLevel <= 6) {
         boolean wayIsDisputed = isDisputed(feature.tags());
         disputed |= wayIsDisputed;
         if (wayIsDisputed) {
@@ -251,7 +252,7 @@ public class Boundary implements
         int minzoom =
           (maritime && minAdminLevel == 2) ? 4 :
             minAdminLevel <= 4 ? 5 :
-            minAdminLevel <= 6 ? 9 :
+            minAdminLevel <= 6 ? 6 :
             minAdminLevel <= 8 ? 11 : 12;
         if (addCountryNames && !regionIds.isEmpty()) {
           // save for later
@@ -282,9 +283,10 @@ public class Boundary implements
         } else {
           features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
             .setAttr(Fields.ADMIN_LEVEL, minAdminLevel)
-            .setAttr(Fields.DISPUTED, disputed ? 1 : 0)
-            .setAttr(Fields.MARITIME, maritime ? 1 : 0)
+            .setAttr(Fields.DISPUTED, disputed ? 1 : null)
+            .setAttr(Fields.MARITIME, maritime ? 1 : null)
             .setMinPixelSizeAtAllZooms(0)
+            .setPixelToleranceFactor(2)
             .setMinZoom(minzoom)
             .setAttr(Fields.CLAIMED_BY, claimedBy)
             .setAttr(Fields.DISPUTED_NAME, editName(disputedName));
@@ -313,9 +315,10 @@ public class Boundary implements
 
             var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString));
             features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+              .setPixelToleranceFactor(3.0)
               .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
-              .setAttr(Fields.DISPUTED, key.disputed ? 1 : 0)
-              .setAttr(Fields.MARITIME, key.maritime ? 1 : 0)
+              .setAttr(Fields.DISPUTED, key.disputed ? 1 : null)
+              .setAttr(Fields.MARITIME, key.maritime ? 1 : null)
               .setAttr(Fields.CLAIMED_BY, key.claimedBy)
               .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
               .setAttr(Fields.ADM0_L, borderingRegions.left == null ? null : regionNames.get(borderingRegions.left))

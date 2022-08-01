@@ -45,12 +45,12 @@ import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
-import com.onthegomap.planetiler.collection.Hppc;
-import com.onthegomap.planetiler.config.PlanetilerConfig;
-import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
 import com.onthegomap.planetiler.openmaptiles.generated.Tables;
 import com.onthegomap.planetiler.openmaptiles.util.OmtLanguageUtils;
+import com.onthegomap.planetiler.collection.Hppc;
+import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
 import com.onthegomap.planetiler.util.Translations;
@@ -79,25 +79,36 @@ public class Poi implements
     entry(FieldValues.CLASS_HOSPITAL, 20),
     entry(FieldValues.CLASS_RAILWAY, 40),
     entry(FieldValues.CLASS_BUS, 50),
-    entry(FieldValues.CLASS_ATTRACTION, 70),
-    entry(FieldValues.CLASS_HARBOR, 75),
-    entry(FieldValues.CLASS_COLLEGE, 80),
-    entry(FieldValues.CLASS_SCHOOL, 85),
-    entry(FieldValues.CLASS_STADIUM, 90),
-    entry("zoo", 95),
-    entry(FieldValues.CLASS_TOWN_HALL, 100),
-    entry(FieldValues.CLASS_CAMPSITE, 110),
+    entry(FieldValues.CLASS_ATTRACTION, 60),
+    entry(FieldValues.CLASS_HARBOR, 70),
+    entry(FieldValues.CLASS_STADIUM, 80),
+    entry("zoo", 90),
+    entry(FieldValues.CLASS_TOWN_HALL, 95),
+    entry(FieldValues.CLASS_CAMPSITE, 100),
+    entry("pharmacy", 101),
+    entry("national_park", 103),
+    entry("aerialway", 105),
     entry(FieldValues.CLASS_CEMETERY, 115),
-    entry(FieldValues.CLASS_PARK, 120),
-    entry(FieldValues.CLASS_LIBRARY, 130),
+    entry("drinking_water", 121),
+    entry(FieldValues.CLASS_COLLEGE, 125),
+    entry(FieldValues.CLASS_SCHOOL, 130),
     entry("police", 135),
     entry(FieldValues.CLASS_POST, 140),
-    entry(FieldValues.CLASS_GOLF, 150),
-    entry(FieldValues.CLASS_SHOP, 400),
-    entry(FieldValues.CLASS_GROCERY, 500),
+    entry("bakery", 150),
+    entry(FieldValues.CLASS_PARK, 151),
+    entry(FieldValues.CLASS_PITCH, 152),
+    entry(FieldValues.CLASS_GOLF, 155),
+    entry("bank", 156),
+    entry(FieldValues.CLASS_BEER, 160),
+    entry("biergarten", 161),
+    entry(FieldValues.CLASS_BAR, 170),
+    entry(FieldValues.CLASS_SHOP, 180),
+    entry("restaurant", 200),
+    entry(FieldValues.CLASS_GROCERY, 250),
+    entry(FieldValues.CLASS_LIBRARY, 300),
     entry(FieldValues.CLASS_FAST_FOOD, 600),
     entry(FieldValues.CLASS_CLOTHING_STORE, 700),
-    entry(FieldValues.CLASS_BAR, 800)
+    entry(FieldValues.CLASS_LODGING, 800)
   );
   private final MultiExpression.Index<String> classMapping;
   private final Translations translations;
@@ -120,6 +131,9 @@ public class Poi implements
   }
 
   private int minzoom(String subclass, String mappingKey) {
+    if ("alpine_hut".equals(subclass) || "wilderness_hut".equals(subclass) || "camp_site".equals(subclass) || "spring".equals(subclass)) {
+      return 11;
+    }
     boolean lowZoom = ("station".equals(subclass) && "railway".equals(mappingKey)) ||
       "halt".equals(subclass) || "ferry_terminal".equals(subclass);
     return lowZoom ? 12 : 14;
@@ -136,7 +150,7 @@ public class Poi implements
     setupPoiFeature(element, features.centroidIfConvex(LAYER_NAME));
   }
 
-  private <T extends Tables.WithSubclass & Tables.WithStation & Tables.WithFunicular & Tables.WithSport & Tables.WithInformation & Tables.WithReligion & Tables.WithMappingKey & Tables.WithName & Tables.WithIndoor & Tables.WithLayer & Tables.WithSource & Tables.WithOperator & Tables.WithNetwork> void setupPoiFeature(
+  private <T extends Tables.WithSubclass & Tables.WithStation & Tables.WithFunicular & Tables.WithSport & Tables.WithInformation & Tables.WithReligion & Tables.WithMappingKey & Tables.WithName & Tables.WithIndoor & Tables.WithLayer & Tables.WithSource> void setupPoiFeature(
     T element, FeatureCollector.Feature output) {
     String rawSubclass = element.subclass();
     if ("station".equals(rawSubclass) && "subway".equals(element.station())) {
@@ -146,36 +160,37 @@ public class Poi implements
       rawSubclass = "halt";
     }
 
-    // ATM names fall back to operator, or else network
-    String name = element.name();
-    var tags = element.source().tags();
-    if ("atm".equals(rawSubclass) && nullOrEmpty(name)) {
-      name = coalesce(nullIfEmpty(element.operator()), nullIfEmpty(element.network()));
-      if (name != null) {
-        tags.put("name", name);
-      }
+    if (nullOrEmpty(element.name()) && "viewpoint".equals(rawSubclass)) {
+      rawSubclass = "halt";
     }
+    String poiClass = poiClass(rawSubclass, element.mappingKey());
 
     String subclass = switch (rawSubclass) {
       case "information" -> nullIfEmpty(element.information());
       case "place_of_worship" -> nullIfEmpty(element.religion());
-      case "pitch" -> nullIfEmpty(element.sport());
-      default -> rawSubclass;
+      case "pitch" -> nullIfEmpty(element.sport() != null ? element.sport().replace(";*", ""): null);
+      default -> rawSubclass.equals(poiClass) ? null : rawSubclass;
     };
-    String poiClass = poiClass(rawSubclass, element.mappingKey());
     int poiClassRank = poiClassRank(poiClass);
-    int rankOrder = poiClassRank + ((nullOrEmpty(name)) ? 2000 : 0);
+    int rankOrder = poiClassRank + ((nullOrEmpty(element.name())) ? 2000 : 0);
 
     output.setBufferPixels(BUFFER_SIZE)
       .setAttr(Fields.CLASS, poiClass)
       .setAttr(Fields.SUBCLASS, subclass)
+      // .setAttr("historic", nullIfEmpty((String) element.source().getTag("historic")))
       .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
       .setAttr(Fields.LEVEL, Parse.parseLongOrNull(element.source().getTag("level")))
+      // .setAttr("capacity", Parse.parseLongOrNull(element.source().getTag("capacity")))
+      .setAttr("funicular", nullIfLong(Parse.boolInt(element.source().getTag("funicular")), 0))
       .setAttr(Fields.INDOOR, element.indoor() ? 1 : null)
       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
       .setPointLabelGridPixelSize(14, 64)
-      .setSortKey(rankOrder)
       .setMinZoom(minzoom(element.subclass(), element.mappingKey()));
+    if (!"spring".equals(subclass)) {
+      output.setSortKey(rankOrder);
+    } else {
+      output.setAttr(Fields.RANK, 1);
+    }
   }
 
   @Override

@@ -35,28 +35,29 @@ See https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md for deta
 */
 package com.onthegomap.planetiler.openmaptiles.layers;
 
-import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.coalesce;
 import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullIfEmpty;
+import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullIfLong;
+import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 
 import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
+import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
+import com.onthegomap.planetiler.openmaptiles.generated.Tables;
+import com.onthegomap.planetiler.openmaptiles.util.OmtLanguageUtils;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.GeometryType;
-import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
-import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
-import com.onthegomap.planetiler.openmaptiles.generated.Tables;
-import com.onthegomap.planetiler.openmaptiles.util.OmtLanguageUtils;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.SortKey;
 import com.onthegomap.planetiler.util.Translations;
+import com.onthegomap.planetiler.util.ZoomFunction;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Defines the logic for generating map elements for designated parks polygons and their label points in the {@code
@@ -68,7 +69,9 @@ import java.util.Locale;
 public class Park implements
   OpenMapTilesSchema.Park,
   Tables.OsmParkPolygon.Handler,
-  OpenMapTilesProfile.FeaturePostProcessor {
+  OpenMapTilesProfile.FeaturePostProcessor
+   {
+
 
   // constants for packing the minimum zoom ordering of park labels into the sort-key field
   private static final int PARK_NATIONAL_PARK_BOOST = 1 << (SORT_KEY_BITS - 1);
@@ -76,13 +79,12 @@ public class Park implements
 
   // constants for determining the minimum zoom level for a park label based on its area
   private static final double WORLD_AREA_FOR_70K_SQUARE_METERS =
-    Math.pow(GeoUtils.metersToPixelAtEquator(0, Math.sqrt(70_000)) / 256d, 2);
+    Math.pow(GeoUtils.metersToPixelAtEquator(0, Math.sqrt(90_000)) / 256d, 2);
   private static final double LOG2 = Math.log(2);
-  private static final int PARK_AREA_RANGE = 1 << (SORT_KEY_BITS - 3);
   private static final double SMALLEST_PARK_WORLD_AREA = Math.pow(4, -26); // 2^14 tiles, 2^12 pixels per tile
 
-  private final Translations translations;
   private final Stats stats;
+  private final Translations translations;
 
   public Park(Translations translations, PlanetilerConfig config, Stats stats) {
     this.stats = stats;
@@ -91,36 +93,43 @@ public class Park implements
 
   @Override
   public void process(Tables.OsmParkPolygon element, FeatureCollector features) {
-    String protectionTitle = element.protectionTitle();
-    if (protectionTitle != null) {
-      protectionTitle = protectionTitle.replace(' ', '_').toLowerCase(Locale.ROOT);
-    }
+    // String protectionTitle = element.protectionTitle();
+    // if (protectionTitle != null) {
+    //   protectionTitle = protectionTitle.replace(' ', '_').toLowerCase(Locale.ROOT);
+    // }
     String clazz = coalesce(
-      nullIfEmpty(protectionTitle),
       nullIfEmpty(element.boundary()),
       nullIfEmpty(element.leisure())
     );
 
-    // park shape
-    var outline = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-      .setAttrWithMinzoom(Fields.CLASS, clazz, 5)
-      .setMinPixelSize(2)
-      .setMinZoom(4);
+    try {
+      Double area = element.source().area();
+      // park shape
+      int minzoom = getMinZoomForArea(area);
+      var outline = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+        .setAttr(Fields.CLASS, clazz)
+        // .setAttr("area",area)
+        .setAttr("way_pixels",
+          area != null ? (ZoomFunction<Long>) zoom -> nullIfLong(Math.round(area * Math.pow(256 * Math.pow(2, zoom-1), 2)), 0) :
+            null)
+        // .setAttr(Fields.SUBCLASS, nullIfEmpty(protectionTitle))
+        .setMinPixelSize(2)
+        .setSimplifyUsingVW(true)
+        .setPixelToleranceFactor(2.5)
+        .setMinZoom(minzoom);
+      // park name label point (if it has one)
+      if (element.name() != null) {
 
-    // park name label point (if it has one)
-    if (element.name() != null) {
-      try {
-        double area = element.source().area();
-        int minzoom = getMinZoomForArea(area);
-
-        var names = OmtLanguageUtils.getNamesWithoutTranslations(element.source().tags());
+        var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
 
         outline.putAttrsWithMinzoom(names, 5);
 
         features.pointOnSurface(LAYER_NAME).setBufferPixels(256)
           .setAttr(Fields.CLASS, clazz)
+          // .setAttr(Fields.SUBCLASS, nullIfEmpty(protectionTitle))
           .putAttrs(names)
-          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+          // .setAttr("wikipedia", nullIfEmpty((String) element.source().getTag("wikipedia")))
+          // .setAttr("way_pixels", area)
           .setPointLabelGridPixelSize(14, 100)
           .setSortKey(SortKey
             .orderByTruesFirst("national_park".equals(clazz))
@@ -128,9 +137,9 @@ public class Park implements
             .thenByLog(area, 1d, SMALLEST_PARK_WORLD_AREA, 1 << (SORT_KEY_BITS - 2) - 1)
             .get()
           ).setMinZoom(minzoom);
-      } catch (GeometryException e) {
-        e.log(stats, "omt_park_area", "Unable to get park area for " + element.source().id());
       }
+    } catch (GeometryException e) {
+      e.log(stats, "omt_park_area", "Unable to get park area for " + element.source().id());
     }
   }
 
@@ -138,7 +147,7 @@ public class Park implements
     // sql filter:    area > 70000*2^(20-zoom_level)
     // simplifies to: zoom_level > 20 - log(area / 70000) / log(2)
     int minzoom = (int) Math.floor(20 - Math.log(area / WORLD_AREA_FOR_70K_SQUARE_METERS) / LOG2);
-    minzoom = Math.min(14, Math.max(5, minzoom));
+    minzoom = Math.min(14, Math.max(4, minzoom));
     return minzoom;
   }
 
@@ -153,7 +162,7 @@ public class Park implements
         counts.put(feature.group(), count);
       }
     }
-    if (zoom <= 4) {
+    if (zoom <= 8) {
       items = FeatureMerge.mergeOverlappingPolygons(items, 0);
     }
     return items;
