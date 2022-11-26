@@ -42,12 +42,12 @@ import static com.onthegomap.planetiler.openmaptiles.util.Utils.nullIfLong;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
-import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
-import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
-import com.onthegomap.planetiler.openmaptiles.generated.Tables;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
+import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
+import com.onthegomap.planetiler.openmaptiles.generated.Tables;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.reader.osm.OsmElement;
 import com.onthegomap.planetiler.reader.osm.OsmReader;
@@ -114,13 +114,6 @@ public class Route implements
             String name =
                 coalesce(nullIfEmpty(relation.getString("name")), nullIfEmpty(relation.getString("alt_name")));
             String ref = coalesce(nullIfEmpty(relation.getString("ref")), nullIfEmpty(relation.getString("osmc:ref")));
-            // if (ref == null && name != null) {
-            //     //TRIM(BOTH '-–' from REGEXP_REPLACE(SPLIT_PART(SPLIT_PART(name, ':', 1), ',', 1), '([^A-Z0-9\:\,\-–]+)|(\M-\m)', '', 'g'))
-            //     ref = (name.split(":")[0].split(",")[0]).replaceAll("([^A-Z0-9\\:\\,\\-–]+)|(\\M-\\m)", "").replaceAll("--", "");
-            // }
-            // if (relation.hasTag("type", "superroute")) {
-            //     LOGGER.warn("superroute: " + name + " " + ref + " " + networkType + " " + relation.id());
-            // }
             return List.of(new RouteRelation(
                 type,
                 name,
@@ -141,9 +134,6 @@ public class Route implements
         List<RouteRelation> relations = getRouteRelations(feature);
         if (relations != null && !relations.isEmpty() && feature.canBeLine()) {
             for (var relation : relations) {
-                // if (relation.type.equals("superroute")) {
-                //     LOGGER.warn("processAllOsm superroute: " + relation.name + " " + relation.id());
-                // }
                 long relId = relation.id();
                 RouteRelationData routeRelationData;
                 if (!routeRelationDatas.containsKey(relId)) {
@@ -162,12 +152,14 @@ public class Route implements
                     e.log(stats, "route_decode", "Unable to get route length for " + feature.id());
                 }
                 String name = relation.name();
+                String clazz = relation.route();
                 int networkType = relation.networkType();
-                int minzoom = getMinzoom(networkType, name != null);
+                int minzoom = getMinzoom(clazz, networkType, name != null);
                 // if (relation.type.equals("superroute")) {
                 // if (networkType == 1) {
                 //     LOGGER.warn("processAllOsm route: " + name);
                 // }
+                String symbol = nullIfEmpty(relation.symbol());
                 features.line(LAYER_NAME)
                     .setBufferPixels(BUFFER_SIZE)
                     .setAttr("ref", relation.ref())
@@ -176,12 +168,12 @@ public class Route implements
                     .setAttr("ascent", relation.ascent() != null ? nullIfLong(Math.round(relation.ascent()), 0) : null)
                     .setAttr("descent",
                         relation.descent() != null ? nullIfLong(Math.round(relation.descent()), 0) : null)
-                    .setMinZoom(minzoom)
                     .setAttr("distance",
                         relation.distance() != null ? nullIfLong(Math.round(relation.distance()), 0) : null)
-                    .setAttr("symbol", nullIfEmpty(relation.symbol()))
-                    .setAttr(Fields.CLASS, relation.route())
+                    .setAttr("symbol", symbol)
+                    .setAttr(Fields.CLASS, clazz)
                     .setAttr("name", name)
+                    .setMinZoom(minzoom)
                     .setSortKey(feature.getWayZorder())
                     .setMinPixelSize(0);
             }
@@ -280,15 +272,13 @@ public class Route implements
         //     .setMinPixelSizeBelowZoom(11, 0);
     }
 
-    int getMinzoom(Integer networkType, boolean hasName) {
-        int minzoom = switch (networkType) {
+    int getMinzoom(String clazz, Integer networkType, boolean hasName) {
+        return switch (networkType) {
             case 1 -> hasName ? 5 : 6;
-            case 2 -> 8;
+            case 2 -> clazz.equals("bicycle") ? 6 : 8;
             case 3 -> 9;
             default -> 10;
         };
-
-        return minzoom;
     }
 
 
@@ -312,7 +302,7 @@ public class Route implements
             }
         }
         double minLength = config.minFeatureSize(zoom) / 2.0;
-        double tolerance = config.tolerance(zoom) * 0.5;
+        double tolerance = config.tolerance(zoom);
         // double tolerance = zoom== 7 ? 100 : config.tolerance(zoom);
         // if (zoom==6) {
         //     tolerance = 2000;
