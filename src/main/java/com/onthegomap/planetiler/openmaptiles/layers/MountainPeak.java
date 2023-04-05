@@ -158,7 +158,7 @@ public class MountainPeak implements
         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
         .putAttrs(elevationTags(meters))
         .setSortKeyDescending(
-          metersInt + ("peak".equals(natural) ? 10_000 : 0) + (nullIfEmpty(element.name()) != null ? 10_000 : 0)
+          metersInt + ("peak".equals(natural) ? 10_000 : 0) + ("volcano".equals(natural) ? 12_000 : 0) + (nullIfEmpty(element.name()) != null ? 10_000 : 0)
         )
         .setMinZoom(minzoom)
         .setBufferPixels(BUFFER_SIZE);
