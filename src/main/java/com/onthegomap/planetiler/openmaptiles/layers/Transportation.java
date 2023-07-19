@@ -407,6 +407,7 @@ public class Transportation implements
           ((ZoomFunction<Integer>) z -> z < 9 ? null : z >= 12 ? rampAboveZ12 : rampBelowZ12))
         // z12+
         .setAttrWithMinzoom(Fields.SERVICE, service, 12)
+        .setAttrWithMinzoom("maxspeed", nullIfLong(element.source().getLong("maxspeed"), 0), 12)
         .setAttrWithMinzoom(Fields.ONEWAY, nullIfInt(element.isOneway(), 0), 12)
         .setAttrWithMinzoom("construction",
           ((element.highway() != null && element.highway().equals("construction")) ||
