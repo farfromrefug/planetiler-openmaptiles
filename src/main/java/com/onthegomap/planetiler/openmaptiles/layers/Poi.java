@@ -108,7 +108,8 @@ public class Poi implements
     entry(FieldValues.CLASS_LIBRARY, 300),
     entry(FieldValues.CLASS_FAST_FOOD, 600),
     entry(FieldValues.CLASS_CLOTHING_STORE, 700),
-    entry(FieldValues.CLASS_LODGING, 800)
+    entry(FieldValues.CLASS_LODGING, 800),
+    entry("bicycle_repair_station", 900)
   );
   private final MultiExpression.Index<String> classMapping;
   private final Translations translations;
