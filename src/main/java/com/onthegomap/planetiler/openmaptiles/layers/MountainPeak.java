@@ -255,7 +255,7 @@ public class MountainPeak implements
       }
     }
 
-    // remave small peaks which are too close to other ones
+    // remove small peaks which are too close to other ones
     for (int i = peaks.size() -1 ; i >=0; i--) {
       GeomWithData<VectorTile.Feature> data = peaks.get(i);
       var coord = data.coord();
@@ -270,7 +270,7 @@ public class MountainPeak implements
       }
     }
 
-    // no give a rank
+    // now give a rank
     List<GeomWithData<VectorTile.Feature>> rankedPeaks = new ArrayList<>();
     List<VectorTile.Feature> actualItems = new ArrayList<>();
     for (int i = 0 ; i < peaks.size(); i++) {
