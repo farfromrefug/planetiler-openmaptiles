@@ -162,9 +162,9 @@ public class Poi implements
       rawSubclass = "halt";
     }
 
-    if (nullOrEmpty(element.name()) && "viewpoint".equals(rawSubclass)) {
-      rawSubclass = "halt";
-    }
+    // if (nullOrEmpty(element.name()) && "viewpoint".equals(rawSubclass)) {
+    //   rawSubclass = "halt";
+    // }
     String poiClass = poiClass(rawSubclass, element.mappingKey());
 
     String subclass = switch (rawSubclass) {
@@ -174,20 +174,28 @@ public class Poi implements
       default -> rawSubclass.equals(poiClass) ? null : rawSubclass;
     };
     int poiClassRank = poiClassRank(poiClass);
-    int rankOrder = poiClassRank + ((nullOrEmpty(element.name())) ? 2000 : 0);
-
+    // some viewpoints have no name but a description
+    String name = nullOrEmpty(element.name())  && "viewpoint".equals(rawSubclass) ? (String) element.source().getTag("description") : element.name() ;
+    int rankOrder = poiClassRank + (nullOrEmpty(name) ? 2000 : 0);
+    var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
     output.setBufferPixels(BUFFER_SIZE)
       .setAttr(Fields.CLASS, poiClass)
       .setAttr(Fields.SUBCLASS, subclass)
-      // .setAttr("historic", nullIfEmpty((String) element.source().getTag("historic")))
+      // .setAttr("historic", nullIfEmpty((String)
+      // element.source().getTag("historic")))
       .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
       .setAttr(Fields.LEVEL, Parse.parseLongOrNull(element.source().getTag("level")))
-      // .setAttr("capacity", Parse.parseLongOrNull(element.source().getTag("capacity")))
+      // .setAttr("capacity",
+      // Parse.parseLongOrNull(element.source().getTag("capacity")))
       .setAttr("funicular", nullIfLong(Parse.boolInt(element.source().getTag("funicular")), 0))
       .setAttr(Fields.INDOOR, element.indoor() ? 1 : null)
-      .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+      .putAttrs(names)
       .setPointLabelGridPixelSize(14, 64)
       .setMinZoom(minzoom(element.subclass(), element.mappingKey()));
+
+    if (names.isEmpty() && !nullOrEmpty(name)) {
+      output.setAttr(Fields.NAME, name);
+    }
     if (!"spring".equals(subclass)) {
       output.setSortKey(rankOrder);
     } else {
