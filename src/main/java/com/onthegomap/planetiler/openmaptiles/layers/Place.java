@@ -146,7 +146,7 @@ public class Place implements
       // population DESC NULLS LAST,
       .thenByLog(population, MAX_CITY_POPULATION, 1, 1 << (SORT_KEY_BITS - 13) - 1)
       // length(name) ASC
-      .thenByInt(name == null ? 0 : name.length(), 0, 31) // 5 bits
+      // .thenByInt(name == null ? 0 : name.length(), 0, 31) // 5 bits
       .get();
   }
 
