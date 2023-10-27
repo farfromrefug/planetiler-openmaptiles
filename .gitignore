@@ -1,13 +1,13 @@
 .DS_Store
 
 target/
+.flattened-pom.xml
 *.jar
 !.mvn/wrapper/*.jar
 *.log
 
 # idea
 */.idea
-.idea/
 .idea/*
 *.iml
 !.idea/codeStyles
@@ -19,3 +19,5 @@ target/
 .project
 .settings
 bin/
+
+data/

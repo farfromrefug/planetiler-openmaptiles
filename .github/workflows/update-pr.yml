@@ -18,7 +18,7 @@ jobs:
     steps:
       # report status back to pull request
       - uses: haya14busa/action-workflow_run-status@v1
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: 'Download branch build info'
         uses: dawidd6/action-download-artifact@v2
         with:
@@ -26,7 +26,6 @@ jobs:
           run_id: ${{ github.event.workflow_run.id }}
           name: build-info
           path: build-info
-          repo: openmaptiles/planetiler-openmaptiles
       - name: 'Get build info'
         id: build_info
         run: echo "::set-output name=pr_number::$(cat build-info/pull_request_number)"
@@ -61,7 +60,7 @@ jobs:
           </tr>
           </table>
 
-          https://github.com/onthegomap/planetiler/actions/runs/${{ github.event.workflow_run.id }}
+          https://github.com/openmaptiles/planetiler-openmaptiles/actions/runs/${{ github.event.workflow_run.id }}
 
           <details><summary>ℹ️ <strong>Base Logs $(cat build-info/base_sha)</strong></summary>
 
