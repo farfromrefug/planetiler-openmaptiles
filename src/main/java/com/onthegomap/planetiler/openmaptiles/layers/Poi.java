@@ -110,7 +110,7 @@ public class Poi implements
     entry(FieldValues.CLASS_CLOTHING_STORE, 700),
     entry(FieldValues.CLASS_LODGING, 800),
     entry("bicycle_repair_station", 900),
-    entry("viewpoint", 2_000)
+    entry("viewpoint", 1_001)
   );
   private final MultiExpression.Index<String> classMapping;
   private final Translations translations;
@@ -120,8 +120,8 @@ public class Poi implements
     this.translations = translations;
   }
 
-  static int poiClassRank(String clazz) {
-    return CLASS_RANKS.getOrDefault(clazz, 1_000);
+  static int poiClassRank(String clazz,String subclazz) {
+    return CLASS_RANKS.getOrDefault(subclazz, CLASS_RANKS.getOrDefault(clazz, 1_000));
   }
 
   private String poiClass(String subclass, String mappingKey) {
@@ -132,12 +132,12 @@ public class Poi implements
     ), subclass);
   }
 
-  private int minzoom(String subclass, String mappingKey) {
+  private int minzoom(String poiClass, String subclass, String mappingKey) {
     if ("alpine_hut".equals(subclass) || "wilderness_hut".equals(subclass) || "camp_site".equals(subclass) || "spring".equals(subclass)) {
-      return 11;
+      return 9;
     }
     boolean lowZoom = ("station".equals(subclass) && "railway".equals(mappingKey)) ||
-      "halt".equals(subclass) || "ferry_terminal".equals(subclass);
+      "halt".equals(subclass) || "ferry_terminal".equals(subclass) || "drinking_water".equals(poiClass);
     return lowZoom ? 12 : 14;
   }
 
@@ -173,7 +173,7 @@ public class Poi implements
       case "pitch" -> nullIfEmpty(element.sport() != null ? element.sport().replace(";*", ""): null);
       default -> rawSubclass.equals(poiClass) ? null : rawSubclass;
     };
-    int poiClassRank = poiClassRank(poiClass);
+    int poiClassRank = poiClassRank(poiClass, rawSubclass);
     // some viewpoints have no name but a description
     String name = nullOrEmpty(element.name())  && "viewpoint".equals(rawSubclass) ? (String) element.source().getTag("description") : element.name() ;
     int rankOrder = poiClassRank + (nullOrEmpty(name) ? 2000 : 0);
@@ -191,15 +191,15 @@ public class Poi implements
       .setAttr(Fields.INDOOR, element.indoor() ? 1 : null)
       .putAttrs(names)
       .setPointLabelGridPixelSize(14, 64)
-      .setMinZoom(minzoom(element.subclass(), element.mappingKey()));
+      .setMinZoom(minzoom(poiClass, element.subclass(), element.mappingKey()));
 
     if (names.isEmpty() && !nullOrEmpty(name)) {
       output.setAttr(Fields.NAME, name);
     }
-    if (!"spring".equals(subclass)) {
-      output.setSortKey(rankOrder);
-    } else {
+    if ("spring".equals(subclass)) {
       output.setAttr(Fields.RANK, 1);
+    } else {
+      output.setSortKey(rankOrder);
     }
   }
 
