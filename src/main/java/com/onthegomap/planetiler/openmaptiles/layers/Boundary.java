@@ -38,6 +38,7 @@ package com.onthegomap.planetiler.openmaptiles.layers;
 import static com.onthegomap.planetiler.util.MemoryEstimator.CLASS_HEADER_BYTES;
 import static com.onthegomap.planetiler.util.MemoryEstimator.POINTER_BYTES;
 import static com.onthegomap.planetiler.util.MemoryEstimator.estimateSize;
+import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 import static java.util.stream.Collectors.counting;
 import static java.util.stream.Collectors.groupingBy;
 
@@ -47,6 +48,7 @@ import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.openmaptiles.OpenMapTilesProfile;
 import com.onthegomap.planetiler.openmaptiles.generated.OpenMapTilesSchema;
+import com.onthegomap.planetiler.openmaptiles.util.OmtLanguageUtils;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
@@ -54,11 +56,13 @@ import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.reader.osm.OsmElement;
+import com.onthegomap.planetiler.reader.osm.OsmReader.RelationMember;
 import com.onthegomap.planetiler.reader.osm.OsmRelationInfo;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Format;
 import com.onthegomap.planetiler.util.MemoryEstimator;
 import com.onthegomap.planetiler.util.Parse;
+import com.onthegomap.planetiler.util.SortKey;
 import com.onthegomap.planetiler.util.Translations;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -127,6 +131,8 @@ public class Boundary implements
   private final Map<CountryBoundaryComponent, List<Geometry>> boundariesToMerge = new HashMap<>();
   private final PlanetilerConfig config;
 
+  private final Translations translations;
+
   public Boundary(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
     this.addCountryNames = config.arguments().getBoolean(
@@ -135,6 +141,7 @@ public class Boundary implements
       true
     );
     this.stats = stats;
+    this.translations = translations;
   }
 
   private static boolean isDisputed(Map<String, Object> tags) {
@@ -192,10 +199,11 @@ public class Boundary implements
       relation.hasTag("admin_level") &&
       relation.hasTag("boundary", "administrative")) {
       Integer adminLevelValue = Parse.parseRoundInt(relation.getTag("admin_level"));
-      String code = relation.getString("ISO3166-1:alpha3");
+      String code = relation.getString("ISO3166-1:alpha3", relation.getString("ISO3166-2"));
       if (adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 6) {
         boolean disputed = isDisputed(relation.tags());
         if (code != null) {
+          LOGGER.info("Adding regionNames " + relation.id() + " "  + code);
           regionNames.put(relation.id(), code);
         }
         return List.of(new BoundaryRelation(
@@ -203,6 +211,8 @@ public class Boundary implements
           adminLevelValue,
           disputed,
           relation.getString("name"),
+          relation.getString("ref"),
+          relation.getString("wikipedia"),
           disputed ? relation.getString("claimed_by") : null,
           code
         ));
@@ -211,6 +221,7 @@ public class Boundary implements
     return null;
   }
 
+  // private static final double SMALLEST_REGION_WORLD_AREA = Math.pow(4, -26); // 2^14 tiles, 2^12 pixels per tile
   @Override
   public void processAllOsm(SourceFeature feature, FeatureCollector features) {
     if (!feature.canBeLine()) {
@@ -234,7 +245,8 @@ public class Boundary implements
           disputedName = disputedName == null ? rel.name : disputedName;
           claimedBy = claimedBy == null ? rel.claimedBy : claimedBy;
         }
-        if (minAdminLevel == 2 && regionNames.containsKey(info.relation().id)) {
+        if ((minAdminLevel == 2 || minAdminLevel == 4 || minAdminLevel == 6) && regionNames.containsKey(info.relation().id)) {
+          LOGGER.info("Adding regionIds " + info.relation().id);
           regionIds.add(info.relation().id);
         }
       }
@@ -257,7 +269,7 @@ public class Boundary implements
         if (addCountryNames && !regionIds.isEmpty()) {
           // save for later
           try {
-            CountryBoundaryComponent component = new CountryBoundaryComponent(
+            CountryBoundaryComponent component = minAdminLevel <= 2 ? new CountryBoundaryComponent(
               minAdminLevel,
               disputed,
               maritime,
@@ -266,13 +278,29 @@ public class Boundary implements
               regionIds,
               claimedBy,
               disputedName
-            );
+            ) : null;
             // multiple threads may update this concurrently
             synchronized (this) {
-              boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>()).add(component.line);
+              if (minAdminLevel <= 2) {
+                boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>()).add(component.line);
+              }
               for (var info : relationInfos) {
+                if (minAdminLevel == 4 || minAdminLevel == 6) {
+                  component =  new CountryBoundaryComponent(
+                    minAdminLevel,
+                    false,
+                    maritime,
+                    minzoom,
+                    feature.line(),
+                    regionIds,
+                    null,
+                    info.relation().name
+                  );
+                  boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>()).add(component.line);
+                }
                 var rel = info.relation();
-                if (rel.adminLevel <= 2) {
+                if (rel.adminLevel <= 2 || rel.adminLevel == 4 || rel.adminLevel == 6) {
+                  LOGGER.info("adding regionGeometries " + rel.id);
                   regionGeometries.computeIfAbsent(rel.id, id -> new ArrayList<>()).add(component.line);
                 }
               }
@@ -304,31 +332,63 @@ public class Boundary implements
 
       for (var entry : boundariesToMerge.entrySet()) {
         CountryBoundaryComponent key = entry.getKey();
-        LineMerger merger = new LineMerger();
-        for (Geometry geom : entry.getValue()) {
-          merger.add(geom);
-        }
-        entry.getValue().clear();
-        for (Object merged : merger.getMergedLineStrings()) {
-          if (merged instanceof LineString lineString) {
-            BorderingRegions borderingRegions = getBorderingRegions(countryBoundaries, key.regions, lineString);
+        if (key.adminLevel <= 2) {
+          LineMerger merger = new LineMerger();
+          for (Geometry geom : entry.getValue()) {
+            merger.add(geom);
+          }
+          entry.getValue().clear();
+          for (Object merged : merger.getMergedLineStrings()) {
+            if (merged instanceof LineString lineString) {
+              BorderingRegions borderingRegions = getBorderingRegions(countryBoundaries, key.regions, lineString);
 
-            var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString));
-            features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-              .setPixelToleranceFactor(3.0)
-              .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
-              .setAttr(Fields.DISPUTED, key.disputed ? 1 : null)
-              .setAttr(Fields.MARITIME, key.maritime ? 1 : null)
-              .setAttr(Fields.CLAIMED_BY, key.claimedBy)
-              .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
-              .setAttr(Fields.ADM0_L, borderingRegions.left == null ? null : regionNames.get(borderingRegions.left))
-              .setAttr(Fields.ADM0_R, borderingRegions.right == null ? null : regionNames.get(borderingRegions.right))
-              .setMinPixelSizeAtAllZooms(0)
-              .setMinZoom(key.minzoom);
-            for (var feature : features) {
-              emit.accept(feature);
+              var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString));
+              features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+                .setPixelToleranceFactor(3.0)
+                .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
+                .setAttr(Fields.DISPUTED, key.disputed ? 1 : null)
+                .setAttr(Fields.MARITIME, key.maritime ? 1 : null)
+                .setAttr(Fields.CLAIMED_BY, key.claimedBy)
+                .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
+                .setAttr(Fields.ADM0_L, (borderingRegions == null || borderingRegions.left == null) ? null : regionNames.get(borderingRegions.left))
+                .setAttr(Fields.ADM0_R, (borderingRegions == null || borderingRegions.right == null) ? null : regionNames.get(borderingRegions.right))
+                .setMinPixelSizeAtAllZooms(0)
+                .setMinZoom(key.minzoom);
+
+              for (var feature : features) {
+                emit.accept(feature);
+              }
             }
           }
+        // } else if (key.adminLevel == 4 || key.adminLevel == 6) {
+        //   try {
+        //     Set<Long> regions =  key.regions;
+        //     for (var regionId : regions) {
+        //       // LOGGER.info("testing for relation " + relationInfos.size() + " " + relation.id + " " + relation.name);
+        //       if (countryBoundaries.containsKey(regionId)) {
+        //         PreparedGeometry geom = countryBoundaries.get(regionId);
+        //         // var names = OmtLanguageUtils.getNames(key.feature.tags(), translations);
+        //         LOGGER.info("testing for PreparedGeometry " + regionId + " " +   key.name + " " + GeoUtils.worldToLatLonCoords(geom.getGeometry().getCentroid()));
+        //         // LOGGER.info("features2 " + features2);
+        //         featureCollectors.get(SimpleFeature.fromWorldGeometry(geom.getGeometry().getCentroid())).point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+        //           // .putAttrs(names)
+        //           .setAttr("name", key.name)
+        //           .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
+        //           // .setAttr("ref", key.ref)
+        //           // .setAttr("wikipedia",relation.wikipedia)
+        //           // .setPointLabelGridPixelSize(14, 100)
+        //           // .setSortKey(SortKey
+        //           //   .orderByLog(area, 1d, SMALLEST_REGION_WORLD_AREA, 1 << (SORT_KEY_BITS - 2) - 1)
+        //           //   .get()
+        //           // )
+        //           .setMinZoom(key.minzoom);
+        //       }
+        //     }
+            
+            
+        //   } catch (Exception e) {
+        //     // e.printStackTrace();;
+        //   }
         }
       }
       timer.stop();
@@ -404,6 +464,7 @@ public class Boundary implements
         if (combined.isEmpty()) {
           LOGGER.warn("Unable to form closed polygon for OSM relation " + regionId + " (likely missing edges)");
         } else {
+          LOGGER.info("Creating countryBoundaries for " + regionId);
           countryBoundaries.put(regionId, PreparedGeometryFactory.prepare(combined));
         }
       } catch (TopologyException e) {
@@ -439,6 +500,9 @@ public class Boundary implements
     int adminLevel,
     boolean disputed,
     String name,
+    // String names,
+    String ref,
+    String wikipedia,
     String claimedBy,
     String iso3166alpha3
   ) implements OsmRelationInfo {
@@ -446,7 +510,7 @@ public class Boundary implements
     @Override
     public long estimateMemoryUsageBytes() {
       return CLASS_HEADER_BYTES + MemoryEstimator.estimateSizeLong(id) + MemoryEstimator.estimateSizeInt(adminLevel) +
-        estimateSize(disputed) + POINTER_BYTES + estimateSize(name) + POINTER_BYTES + estimateSize(claimedBy) +
+        estimateSize(disputed) + POINTER_BYTES + estimateSize(name) + POINTER_BYTES + estimateSize(ref) + POINTER_BYTES + estimateSize(wikipedia) + POINTER_BYTES + estimateSize(claimedBy) +
         POINTER_BYTES + estimateSize(iso3166alpha3);
     }
   }
