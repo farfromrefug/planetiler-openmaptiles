@@ -674,6 +674,8 @@ public class OpenMapTilesSchema {
 
     /** Attribute names for map elements in the boundary layer. */
     final class Fields {
+      /** The OSM <a href="http://wiki.openstreetmap.org/wiki/Key:name"><code>name</code></a> value of the boundary point. */
+      public static final String NAME = "name";
       /**
        * OSM <a href="http://wiki.openstreetmap.org/wiki/Tag:boundary%3Dadministrative#admin_level">admin_level</a>
        * indicating the level of importance of this boundary. The <code>admin_level</code> corresponds to the lowest
@@ -685,6 +687,11 @@ public class OpenMapTilesSchema {
       public static final String ADM0_L = "adm0_l";
       /** State name on the right of the border. For country boundaries only (<code>admin_level = 2</code>). */
       public static final String ADM0_R = "adm0_r";
+
+      /** The OSM <a href="http://wiki.openstreetmap.org/wiki/Key:wikipedia"><code>wikipedia</code></a> value of the boundary point. */
+      public static final String WIKIPEDIA = "wikipedia";
+      /** The OSM <a href="http://wiki.openstreetmap.org/wiki/Key:ref"><code>ref</code></a> value of the boundary point. */
+      public static final String REF = "ref";
 
       /**
        * Mark with <code>1</code> if the border is disputed.
