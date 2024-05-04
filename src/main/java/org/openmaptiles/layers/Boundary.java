@@ -138,8 +138,6 @@ public class Boundary implements
   private final PlanetilerConfig config;
   private final Translations translations;
 
-  private final Translations translations;
-
   public Boundary(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
     this.addCountryNames = config.arguments().getBoolean(
@@ -306,6 +304,7 @@ public class Boundary implements
               for (var info : relationInfos) {
                 if (minAdminLevel == 4 || minAdminLevel == 6) {
                   component = new CountryBoundaryComponent(
+                      feature.id(),
                       minAdminLevel,
                       false,
                       maritime,
@@ -370,27 +369,27 @@ public class Boundary implements
             if (merged instanceof LineString lineString) {
               BorderingRegions borderingRegions = getBorderingRegions(countryBoundaries, key.regions, lineString);
 
-            var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString, key.id));
-            var newFeature = features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-              .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
-              .setAttr(Fields.DISPUTED, key.disputed ? 1 : 0)
-              .setAttr(Fields.MARITIME, key.maritime ? 1 : 0)
-              .setAttr(Fields.CLAIMED_BY, key.claimedBy)
-              .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
-              .setMinPixelSizeAtAllZooms(0)
-              .setMinZoom(key.minzoom);
-            if (key.adminLevel == 2 && !key.disputed) {
-              // only non-disputed admin 2 boundaries get to have adm0_{l,r}, at zoom 5 and more
-              newFeature
-                .setAttrWithMinzoom(Fields.ADM0_L,
-                  borderingRegions.left == null ? null : regionNames.get(borderingRegions.left), 5)
-                .setAttrWithMinzoom(Fields.ADM0_R,
-                  borderingRegions.right == null ? null : regionNames.get(borderingRegions.right), 5);
+              var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString, key.id));
+              var newFeature = features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+                .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
+                .setAttr(Fields.DISPUTED, key.disputed ? 1 : 0)
+                .setAttr(Fields.MARITIME, key.maritime ? 1 : 0)
+                .setAttr(Fields.CLAIMED_BY, key.claimedBy)
+                .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
+                .setMinPixelSizeAtAllZooms(0)
+                .setMinZoom(key.minzoom);
+              if (key.adminLevel == 2 && !key.disputed) {
+                // only non-disputed admin 2 boundaries get to have adm0_{l,r}, at zoom 5 and more
+                newFeature
+                  .setAttrWithMinzoom(Fields.ADM0_L,
+                    borderingRegions.left == null ? null : regionNames.get(borderingRegions.left), 5)
+                  .setAttrWithMinzoom(Fields.ADM0_R,
+                    borderingRegions.right == null ? null : regionNames.get(borderingRegions.right), 5);
+              }
+              for (var feature : features) {
+                emit.accept(feature);
+              }
             }
-            for (var feature : features) {
-              emit.accept(feature);
-            }
-          }
           // } else if (key.adminLevel == 4 || key.adminLevel == 6) {
           // try {
           // Set<Long> regions = key.regions;
@@ -421,7 +420,7 @@ public class Boundary implements
 
           // } catch (Exception e) {
           // // e.printStackTrace();;
-          // }
+          }
         }
       }
       timer.stop();

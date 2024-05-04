@@ -149,7 +149,7 @@ public class Landuse implements
   public List<VectorTile.Feature> postProcess(int zoom,
     List<VectorTile.Feature> items) throws GeometryException {
     // List<VectorTile.Feature> toMerge = new ArrayList<>();
-    // List<VectorTile.Feature> result = new ArrayList<>();
+    List<VectorTile.Feature> result = new ArrayList<>();
     // for (var item : items) {
     //   if (FieldValues.CLASS_RESIDENTIAL.equals(item.attrs().get(Fields.CLASS))) {
     //     toMerge.add(item);
