@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, MapTiler.com & OpenMapTiles contributors.
+Copyright (c) 2024, MapTiler.com & OpenMapTiles contributors.
 All rights reserved.
 
 Code license: BSD 3-Clause License
@@ -147,7 +147,7 @@ public class Park implements
     // sql filter:    area > 70000*2^(20-zoom_level)
     // simplifies to: zoom_level > 20 - log(area / 70000) / log(2)
     int minzoom = (int) Math.floor(20 - Math.log(area / WORLD_AREA_FOR_70K_SQUARE_METERS) / LOG2);
-    minzoom = Math.min(14, Math.max(4, minzoom));
+    minzoom = Math.clamp(minzoom, 4, 14);
     return minzoom;
   }
 

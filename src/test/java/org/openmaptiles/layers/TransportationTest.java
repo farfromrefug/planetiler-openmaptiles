@@ -3,6 +3,8 @@ package org.openmaptiles.layers;
 import static com.onthegomap.planetiler.TestUtils.newLineString;
 import static com.onthegomap.planetiler.TestUtils.newPoint;
 import static com.onthegomap.planetiler.TestUtils.rectangle;
+import static java.util.Map.entry;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.config.Arguments;
@@ -17,6 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -267,31 +270,6 @@ class TransportationTest extends AbstractLayerTest {
         "bridge", "yes"
       )));
 
-    assertFeatures(13, List.of(mapOf(
-      "_layer", "transportation",
-      "class", "motorway",
-      "surface", "paved",
-      "oneway", 1,
-      "ramp", "<null>",
-      "bicycle", "no",
-      "foot", "no",
-      "horse", "no",
-      "brunnel", "bridge",
-      "network", "us-interstate",
-      "_minzoom", 4
-    ), Map.of(
-      "_layer", "transportation_name",
-      "class", "motorway",
-      "name", "Massachusetts Turnpike",
-      "name_en", "Massachusetts Turnpike",
-      "ref", "90",
-      "ref_length", 2,
-      "network", "us-interstate",
-      "brunnel", "<null>",
-      "route_1", "US:I=90",
-      "_minzoom", 6
-    )), features);
-
     assertFeatures(13, List.of(Map.of(
       "_layer", "transportation",
       "class", "motorway",
@@ -303,17 +281,18 @@ class TransportationTest extends AbstractLayerTest {
       "horse", "no",
       "brunnel", "bridge",
       "_minzoom", 4
-    ), Map.of(
-      "_layer", "transportation_name",
-      "class", "motorway",
-      "name", "Massachusetts Turnpike",
-      "name_en", "Massachusetts Turnpike",
-      "ref", "90",
-      "ref_length", 2,
-      "network", "us-interstate",
-      "route_1", "US:I=90",
-      "brunnel", "<null>",
-      "_minzoom", 6
+    ), Map.ofEntries(
+      entry("_layer", "transportation_name"),
+      entry("class", "motorway"),
+      entry("name", "Massachusetts Turnpike"),
+      entry("name_en", "Massachusetts Turnpike"),
+      entry("ref", "90"),
+      entry("ref_length", 2),
+      entry("network", "us-interstate"),
+      entry("route_1_network", "US:I"),
+      entry("route_1_ref", "90"),
+      entry("brunnel", "<null>"),
+      entry("_minzoom", 6)
     )), features);
 
     assertFeatures(8, List.of(Map.of(
@@ -327,17 +306,65 @@ class TransportationTest extends AbstractLayerTest {
       "horse", "<null>",
       "brunnel", "bridge",
       "_minzoom", 4
+    ), Map.ofEntries(
+      entry("_layer", "transportation_name"),
+      entry("class", "motorway"),
+      entry("name", "Massachusetts Turnpike"),
+      entry("name_en", "Massachusetts Turnpike"),
+      entry("ref", "90"),
+      entry("ref_length", 2),
+      entry("network", "us-interstate"),
+      entry("route_1_network", "US:I"),
+      entry("route_1_ref", "90"),
+      entry("brunnel", "<null>"),
+      entry("_minzoom", 6)
+    )), features);
+  }
+
+  @Test
+  void testDuplicateRoute() {
+    var rel1 = new OsmElement.Relation(1);
+    rel1.setTag("type", "route");
+    rel1.setTag("route", "road");
+    rel1.setTag("network", "US:OK");
+    rel1.setTag("ref", "104");
+    rel1.setTag("direction", "north");
+    var rel2 = new OsmElement.Relation(1);
+    rel2.setTag("type", "route");
+    rel2.setTag("route", "road");
+    rel2.setTag("network", "US:OK");
+    rel2.setTag("ref", "104");
+    rel2.setTag("direction", "south");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      Stream.concat(
+        profile.preprocessOsmRelation(rel2).stream(),
+        profile.preprocessOsmRelation(rel1).stream()
+      ).toList(),
+      Map.of(
+        "highway", "trunk",
+        "ref", "US 23;SR 104",
+        "lanes", 5,
+        "maxspeed", "55 mph",
+        "expressway", "no"
+      )));
+
+    assertFeatures(13, List.of(mapOf(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "us-state",
+      "_minzoom", 6
     ), Map.of(
       "_layer", "transportation_name",
-      "class", "motorway",
-      "name", "Massachusetts Turnpike",
-      "name_en", "Massachusetts Turnpike",
-      "ref", "90",
-      "ref_length", 2,
-      "network", "us-interstate",
-      "route_1", "US:I=90",
-      "brunnel", "<null>",
-      "_minzoom", 6
+      "class", "trunk",
+      "ref", "104",
+      "ref_length", 3,
+      "network", "us-state",
+      "route_1_network", "US:OK",
+      "route_1_ref", "104",
+      "route_2_network", "<null>",
+      "route_2_ref", "<null>",
+      "_minzoom", 8
     )), features);
   }
 
@@ -350,7 +377,7 @@ class TransportationTest extends AbstractLayerTest {
     rel1.setTag("ref", "NJTP");
     rel1.setTag("name", "New Jersey Turnpike (mainline)");
 
-    var rel2 = new OsmElement.Relation(1);
+    var rel2 = new OsmElement.Relation(2);
     rel2.setTag("type", "route");
     rel2.setTag("route", "road");
     rel2.setTag("network", "US:I");
@@ -378,8 +405,55 @@ class TransportationTest extends AbstractLayerTest {
       "name", "New Jersey Turnpike",
       "ref", "95",
       "ref_length", 2,
-      "route_1", "US:I=95",
-      "route_2", "US:NJ:NJTP=NJTP",
+      "route_1_network", "US:I",
+      "route_1_ref", "95",
+      "route_2_network", "US:NJ:NJTP",
+      "route_2_ref", "NJTP",
+      "_minzoom", 6
+    )), rendered);
+  }
+
+  @Test
+  void testRouteWithColour() {
+    var rel1 = new OsmElement.Relation(1);
+    rel1.setTag("type", "route");
+    rel1.setTag("route", "road");
+    rel1.setTag("network", "US:NJ:NJTP");
+    rel1.setTag("ref", "NJTP");
+    rel1.setTag("name", "New Jersey Turnpike (mainline)");
+    rel1.setTag("colour", "#FFFFFF");
+    rel1.setTag("ref:colour", "#888888");
+
+    var rel2 = new OsmElement.Relation(2);
+    rel2.setTag("type", "route");
+    rel2.setTag("route", "road");
+    rel2.setTag("network", "US:I");
+    rel2.setTag("ref", "95");
+    rel2.setTag("name", "I 95 (NJ)");
+    rel2.setTag("ref:colour", "#000000");
+
+    FeatureCollector rendered = process(lineFeatureWithRelation(
+      Stream.concat(
+        profile.preprocessOsmRelation(rel1).stream(),
+        profile.preprocessOsmRelation(rel2).stream()
+      ).toList(),
+      Map.of(
+        "highway", "motorway",
+        "name", "New Jersey Turnpike",
+        "ref", "I 95;NJTP"
+      )));
+
+    assertFeatures(13, List.of(mapOf(
+      "_layer", "transportation",
+      "class", "motorway",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "motorway",
+      "route_1_network", "US:I",
+      "route_1_colour", "#000000",
+      "route_2_network", "US:NJ:NJTP",
+      "route_2_colour", "#FFFFFF",
       "_minzoom", 6
     )), rendered);
   }
@@ -389,7 +463,7 @@ class TransportationTest extends AbstractLayerTest {
     List<OsmRelationInfo> relations = new ArrayList<>();
     for (int route = 1; route <= 16; route++) {
       int num = (route + 1) / 2; // to make dups
-      var rel = new OsmElement.Relation(route);
+      var rel = new OsmElement.Relation(num);
       rel.setTag("type", "route");
       rel.setTag("route", "road");
       rel.setTag("network", "US:I");
@@ -412,15 +486,24 @@ class TransportationTest extends AbstractLayerTest {
       "_minzoom", 4
     ), mapOf(
       "_layer", "transportation_name",
-      "route_1", "US:I=1",
-      "route_2", "US:I=2",
-      "route_3", "US:I=3",
-      "route_4", "US:I=4",
-      "route_5", "US:I=5",
-      "route_6", "US:I=6",
-      "route_7", "US:I=7",
-      "route_8", "US:I=8",
-      "route_9", "<null>"
+      "route_1_network", "US:I",
+      "route_1_ref", "1",
+      "route_2_network", "US:I",
+      "route_2_ref", "2",
+      "route_3_network", "US:I",
+      "route_3_ref", "3",
+      "route_4_network", "US:I",
+      "route_4_ref", "4",
+      "route_5_network", "US:I",
+      "route_5_ref", "5",
+      "route_6_network", "US:I",
+      "route_6_ref", "6",
+      "route_7_network", "US:I",
+      "route_7_ref", "7",
+      "route_8_network", "US:I",
+      "route_8_ref", "8",
+      "route_9_network", "<null>",
+      "route_9_ref", "<null>"
     )), rendered);
   }
 
@@ -499,8 +582,10 @@ class TransportationTest extends AbstractLayerTest {
       "name", "<null>",
       "ref", "S7",
       "ref_length", 2,
-      "route_1", "e-road=E 28",
-      "route_2", "e-road=E 77"
+      "route_1_network", "e-road",
+      "route_1_ref", "E 28",
+      "route_2_network", "e-road",
+      "route_2_ref", "E 77"
     )), rendered);
   }
 
@@ -579,9 +664,30 @@ class TransportationTest extends AbstractLayerTest {
       "ref_length", 2,
       "network", "us-interstate",
       "brunnel", "<null>",
-      "route_1", "US:I=90",
+      "route_1_network", "US:I",
+      "route_1_ref", "90",
       "_minzoom", 6
     )), features);
+  }
+
+  @Test
+  void testMotorwayRoadConstruction() {
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "motorway_construction",
+      "oneway", 1,
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "name", "D4 II/118 – Milín",
+      "class", "motorway_construction",
+      "_minzoom", 6
+    )), process(lineFeature(Map.of(
+      "highway", "construction",
+      "construction", "motorway",
+      "name", "D4 II/118 – Milín",
+      "oneway", "yes"
+    ))));
   }
 
   @Test
@@ -817,17 +923,19 @@ class TransportationTest extends AbstractLayerTest {
       "ramp", "<null>",
       "network", "us-highway",
       "_minzoom", 7
-    ), Map.of(
-      "_layer", "transportation_name",
-      "class", "primary",
-      "name", "Memorial Drive",
-      "name_en", "Memorial Drive",
-      "ref", "3",
-      "ref_length", 1,
-      "network", "us-highway",
-      "route_1", "US:US=3",
-      "route_2", "US:MA=2",
-      "_minzoom", 12
+    ), Map.ofEntries(
+      entry("_layer", "transportation_name"),
+      entry("class", "primary"),
+      entry("name", "Memorial Drive"),
+      entry("name_en", "Memorial Drive"),
+      entry("ref", "3"),
+      entry("ref_length", 1),
+      entry("network", "us-highway"),
+      entry("route_1_network", "US:US"),
+      entry("route_1_ref", "3"),
+      entry("route_2_network", "US:MA"),
+      entry("route_2_ref", "2"),
+      entry("_minzoom", 12)
     )), process(lineFeatureWithRelation(
       Stream.concat(
         profile.preprocessOsmRelation(relUS).stream(),
@@ -847,8 +955,10 @@ class TransportationTest extends AbstractLayerTest {
     ), Map.of(
       "_layer", "transportation_name",
       "class", "primary",
-      "route_1", "US:US=3",
-      "route_2", "US:MA=2",
+      "route_1_network", "US:US",
+      "route_1_ref", "3",
+      "route_2_network", "US:MA",
+      "route_2_ref", "2",
       "ref", "3",
       "network", "us-highway"
     )), process(lineFeatureWithRelation(
@@ -952,6 +1062,316 @@ class TransportationTest extends AbstractLayerTest {
   }
 
   @Test
+  void testTransCanadaTrunk() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:transcanada:namedRoute");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "_minzoom", 4
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaQcA() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:QC:A");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial-arterial",
+      "_minzoom", 4
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaOnPrimaryRef4xx() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:ON:primary");
+    rel.setTag("ref", "420");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial-arterial",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "420",
+      "network", "ca-provincial-arterial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaOnPrimaryRefQew() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:ON:primary");
+    rel.setTag("ref", "QEW");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial-arterial",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "QEW",
+      "network", "ca-provincial-arterial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaOnPrimaryRefOther() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:ON:primary");
+    rel.setTag("ref", "85");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial",
+      "_minzoom", 6
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "85",
+      "network", "ca-provincial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaMbPthRef75() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:MB:PTH");
+    rel.setTag("ref", "75");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial-arterial",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "75",
+      "network", "ca-provincial-arterial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaMbPthRefOther() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:MB:PTH");
+    rel.setTag("ref", "77");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial",
+      "_minzoom", 6
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "77",
+      "network", "ca-provincial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaAbPrimaryRef3() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:AB:primary");
+    rel.setTag("ref", "3");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial-arterial",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "3",
+      "network", "ca-provincial-arterial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaAbPrimaryRefOther() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:AB:primary");
+    rel.setTag("ref", "10");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial",
+      "_minzoom", 6
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "10",
+      "network", "ca-provincial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaBcRef3() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:BC");
+    rel.setTag("ref", "3");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial-arterial",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "3",
+      "network", "ca-provincial-arterial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaBcRefOther() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:BC");
+    rel.setTag("ref", "10");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "network", "ca-provincial",
+      "_minzoom", 6
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "10",
+      "network", "ca-provincial"
+    )), features);
+  }
+
+  @Test
+  void testTransCanadaProvincialCaOther() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "CA:yellowhead");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "_minzoom", 6
+    )), features);
+    boolean caProvPresent = StreamSupport.stream(features.spliterator(), false)
+      .flatMap(f -> f.getAttrsAtZoom(13).entrySet().stream())
+      .filter(e -> "network".equals(e.getKey()))
+      .map(Map.Entry::getValue)
+      .anyMatch(v -> "ca-provincial".equals(v) || "ca-provincial-arterial".equals(v));
+    assertFalse(caProvPresent, "ca-provincial present");
+  }
+
+  @Test
   void testGreatBritainHighway() {
     process(SimpleFeature.create(
       rectangle(0, 0.1),
@@ -1007,6 +1427,307 @@ class TransportationTest extends AbstractLayerTest {
         "highway", "motorway",
         "oneway", "yes",
         "ref", "M1"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testGreatBritainTrunk() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "GB"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in GB
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "_minzoom", 5
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "A272",
+      "ref_length", 4,
+      "network", "gb-trunk",
+      "_minzoom", 8
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "trunk",
+        "ref", "A272"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testGreatBritainPrimary() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "GB"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in GB
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "primary",
+      "_minzoom", 7
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "primary",
+      "ref", "A598",
+      "ref_length", 4,
+      "network", "gb-primary",
+      "_minzoom", 12
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "primary",
+        "ref", "A598"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testGreatBritainSecondary() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "GB"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in GB
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "secondary",
+      "_minzoom", 9
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "secondary",
+      "ref", "B4558",
+      "ref_length", 5,
+      "network", "gb-primary",
+      "_minzoom", 12
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "secondary",
+        "ref", "B4558"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testGreatBritainTertiary() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "GB"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in GB
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "tertiary",
+      "_minzoom", 11
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "tertiary",
+      "ref", "B4086",
+      "ref_length", 5,
+      "network", "road",
+      "_minzoom", 12
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "tertiary",
+        "ref", "B4086"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testIrelandHighway() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "IE"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in IE
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "motorway",
+      "oneway", 1,
+      "ramp", "<null>",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "motorway",
+      "ref", "M18",
+      "ref_length", 3,
+      "network", "ie-motorway",
+      "_minzoom", 6
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "motorway",
+        "oneway", "yes",
+        "ref", "M18"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+
+    // not in IE
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "motorway",
+      "oneway", 1,
+      "ramp", "<null>",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "motorway",
+      "ref", "M18",
+      "ref_length", 3,
+      "network", "road",
+      "_minzoom", 6
+    )), process(SimpleFeature.create(
+      newLineString(1, 0, 0, 1),
+      Map.of(
+        "highway", "motorway",
+        "oneway", "yes",
+        "ref", "M18"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testIrelandTrunk() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "IE"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in IE
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "N8",
+      "ref_length", 2,
+      "network", "ie-national",
+      "_minzoom", 8
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "trunk",
+        "ref", "N8"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testIrelandPrimary() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "IE"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in IE
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "primary",
+      "_minzoom", 7
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "primary",
+      "ref", "N59",
+      "ref_length", 3,
+      "network", "ie-national",
+      "_minzoom", 12
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "primary",
+        "ref", "N59"
+      ),
+      OpenMapTilesProfile.OSM_SOURCE,
+      null,
+      0
+    )));
+  }
+
+  @Test
+  void testIrelandSecondary() {
+    process(SimpleFeature.create(
+      rectangle(0, 0.1),
+      Map.of("iso_a2", "IE"),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_admin_0_countries",
+      0
+    ));
+
+    // in IE
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "secondary",
+      "_minzoom", 9
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "secondary",
+      "ref", "R813",
+      "ref_length", 4,
+      "network", "ie-regional",
+      "_minzoom", 12
+    )), process(SimpleFeature.create(
+      newLineString(0, 0, 1, 1),
+      Map.of(
+        "highway", "secondary",
+        "ref", "R813"
       ),
       OpenMapTilesProfile.OSM_SOURCE,
       null,
@@ -1176,8 +1897,9 @@ class TransportationTest extends AbstractLayerTest {
       "_layer", "transportation",
       "class", "ferry",
 
-      "_minzoom", 11,
+      "_minzoom", 4,
       "_maxzoom", 14,
+      "_minpixelsize", 32d,
       "_type", "line"
     ), Map.of(
       "_layer", "transportation_name",
@@ -1356,5 +2078,110 @@ class TransportationTest extends AbstractLayerTest {
       "man_made", "pier",
       "service", "driveway"
     ))));
+  }
+
+  @Test
+  void testGrade1SurfacePath() {
+    assertFeatures(14, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "track",
+      "surface", "paved"
+    )), process(lineFeature(Map.of(
+      "surface", "grade1",
+      "highway", "track"
+    ))));
+  }
+
+  @Test
+  void testGrade1TracktypePath() {
+    assertFeatures(14, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "track",
+      "surface", "paved"
+    )), process(lineFeature(Map.of(
+      "tracktype", "grade1",
+      "highway", "track"
+    ))));
+  }
+
+  @Test
+  void testIssue58() {
+    // test subject: https://www.openstreetmap.org/way/222564359
+    // note: "name:es" used instead of "name:ar" since we've setup only "de" and "es" for unit tests
+    FeatureCollector result = process(lineFeature(Map.of(
+      "name", "איילון דרום",
+      "name:es", "أيالون جنوب",
+      "name:en", "Ayalon South",
+      "highway", "motorway"
+    )));
+    assertFeatures(4, List.of(Map.of(
+      "_layer", "transportation",
+      "_type", "line",
+      "class", "motorway"
+    ), Map.of(
+      "_layer", "transportation_name",
+      "_type", "line",
+      "class", "motorway",
+      "name", "איילון דרום",
+      "name_int", "Ayalon South",
+      "name:latin", "Ayalon South",
+      "name:es", "أيالون جنوب",
+      "name:en", "Ayalon South"
+    )), result);
+  }
+
+  @Test
+  void testARoad() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "AsianHighway");
+    rel.setTag("ref", "AH11");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "trunk",
+        "name", "National Highway 7",
+        "ref", "7"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "trunk",
+      "_minzoom", 6
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "trunk",
+      "ref", "7",
+      "route_1_ref", "AH11"
+    )), features);
+  }
+
+  @Test
+  void testERoad() {
+    var rel = new OsmElement.Relation(1);
+    rel.setTag("type", "route");
+    rel.setTag("route", "road");
+    rel.setTag("network", "e-road");
+    rel.setTag("ref", "E 77");
+
+    FeatureCollector features = process(lineFeatureWithRelation(
+      profile.preprocessOsmRelation(rel),
+      Map.of(
+        "highway", "motorway",
+        "ref", "S7"
+      )));
+
+    assertFeatures(13, List.of(Map.of(
+      "_layer", "transportation",
+      "class", "motorway",
+      "_minzoom", 4
+    ), Map.of(
+      "_layer", "transportation_name",
+      "class", "motorway",
+      "ref", "S7",
+      "route_1_ref", "E 77"
+    )), features);
   }
 }

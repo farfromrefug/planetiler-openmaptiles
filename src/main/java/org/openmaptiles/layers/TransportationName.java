@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, MapTiler.com & OpenMapTiles contributors.
+Copyright (c) 2024, MapTiler.com & OpenMapTiles contributors.
 All rights reserved.
 
 Code license: BSD 3-Clause License
@@ -109,12 +109,12 @@ public class TransportationName implements
   private static final String RELATION_ID_TEMP_KEY = "__relid";
 
   private static final ZoomFunction.MeterToPixelThresholds MIN_LENGTH = ZoomFunction.meterThresholds()
-      .put(6, 20_000)
-      .put(7, 20_000)
-      .put(8, 14_000)
-      .put(9, 8_000)
-      .put(10, 8_000)
-      .put(11, 8_000);
+    .put(6, 20_000)
+    .put(7, 20_000)
+    .put(8, 14_000)
+    .put(9, 8_000)
+    .put(10, 4_000)
+    .put(11, 2_000);
   private final boolean brunnel;
   private final boolean sizeForShield;
   private final boolean limitMerge;
@@ -123,9 +123,11 @@ public class TransportationName implements
   private Transportation transportation;
   private final LongByteMap motorwayJunctionHighwayClasses = Hppc.newLongByteHashMap();
   private final LongSet motorwayJunctionNodes = new LongHashSet();
+  private final Translations translations;
 
   public TransportationName(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
+    this.translations = translations;
     this.brunnel = config.arguments().getBoolean(
         "transportation_name_brunnel",
         "transportation_name layer: set to false to omit brunnel and help merge long highways",
@@ -191,18 +193,18 @@ public class TransportationName implements
   // String subclass = FieldValues.SUBCLASS_JUNCTION;
   // String ref = element.ref();
 
-  // features.point(LAYER_NAME)
-  // .setBufferPixels(BUFFER_SIZE)
-  // .putAttrs(OmtLanguageUtils.getNamesWithoutTranslations(element.source().tags()))
-  // .setAttr(Fields.REF, ref)
-  // .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
-  // .setAttr(Fields.CLASS, highwayClass(cls.highwayValue, null, null, null))
-  // .setAttr(Fields.SUBCLASS, subclass)
-  // .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
-  // .setSortKeyDescending(element.zOrder())
-  // .setMinZoom(10);
-  // }
-  // }
+  //       features.point(LAYER_NAME)
+  //         .setBufferPixels(BUFFER_SIZE)
+  //         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+  //         .setAttr(Fields.REF, ref)
+  //         .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
+  //         .setAttr(Fields.CLASS, highwayClass(cls.highwayValue, null, null, null))
+  //         .setAttr(Fields.SUBCLASS, subclass)
+  //         .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
+  //         .setSortKeyDescending(element.zOrder())
+  //         .setMinZoom(10);
+  //     }
+  //   }
   // }
 
   @Override
@@ -258,13 +260,12 @@ public class TransportationName implements
         .setBufferPixels(BUFFER_SIZE)
         .setBufferPixelOverrides(MIN_LENGTH)
         // TODO abbreviate road names - can't port osml10n because it is AGPL
-        .putAttrs(OmtLanguageUtils.getNamesWithoutTranslations(element.source().tags()))
+        .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
         .setAttr(Fields.REF, ref)
         // .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
-        // // .setAttr(Fields.NETWORK,
-        // firstRelationWithNetwork != null ?
-        // firstRelationWithNetwork.networkType().name : !nullOrEmpty(ref) ? "road" :
-        // null)
+        // .setAttr(Fields.NETWORK,
+        // firstRelationWithNetwork != null ? firstRelationWithNetwork.networkType().name : !nullOrEmpty(ref) ? "road" :
+        //   null)
         .setAttr(Fields.CLASS, highwayClass)
         .setAttr(Fields.SUBCLASS, subclass)
         .setMinPixelSize(0)
@@ -272,18 +273,27 @@ public class TransportationName implements
         .setSortKey(element.zOrder())
         .setMinZoom(minzoom);
 
-    // populate route_1, route_2, ... route_n tags and remove duplicates
+    // populate route_1_<something>, route_2_<something>, ... route_n_<something> tags and remove duplicates
     // Set<String> routes = new HashSet<>();
     // for (var route : relations) {
-    //   String routeString = route.network() + "=" + coalesce(route.ref(), "");
+    //   String routeString = route.network() + "=" +
+    //     coalesce(route.ref(), "") + "=" +
+    //     coalesce(route.name(), "") + "=" +
+    //     coalesce(route.colour(), "");
     //   if (routes.add(routeString)) {
-    //     feature.setAttr("route_" + routes.size(), routeString);
+    //     String keyPrefix = "route_" + routes.size() + "_";
+
+    //     feature.setAttr(keyPrefix + "network", route.network());
+    //     feature.setAttr(keyPrefix + "ref", nullIfEmpty(route.ref()));
+    //     feature.setAttr(keyPrefix + "name", route.name());
+    //     feature.setAttr(keyPrefix + "colour", route.colour());
     //   }
     // }
 
     if (brunnel) {
       feature.setAttr(Fields.BRUNNEL,
-          brunnel(element.isBridge(), element.isTunnel() || element.isCovered(), element.isFord()));
+          brunnel(element.isBridge(), element.isTunnel() || element.isCovered(), element.isFord()),
+          3, 4, 12);
     }
 
     /*
@@ -314,7 +324,7 @@ public class TransportationName implements
       features.line(LAYER_NAME)
           .setBufferPixels(BUFFER_SIZE)
           .setBufferPixelOverrides(MIN_LENGTH)
-          .putAttrs(OmtLanguageUtils.getNamesWithoutTranslations(element.source().tags()))
+          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
           .setAttr(Fields.CLASS, "aerialway")
           .setAttr(Fields.SUBCLASS, element.aerialway())
           .setMinPixelSize(0)
@@ -324,18 +334,17 @@ public class TransportationName implements
   }
 
   // @Override
-  // public void process(Tables.OsmShipwayLinestring element, FeatureCollector
-  // features) {
-  // if (!nullOrEmpty(element.name())) {
-  // features.line(LAYER_NAME)
-  // .setBufferPixels(BUFFER_SIZE)
-  // .setBufferPixelOverrides(MIN_LENGTH)
-  // .putAttrs(OmtLanguageUtils.getNamesWithoutTranslations(element.source().tags()))
-  // .setAttr(Fields.CLASS, element.shipway())
-  // .setMinPixelSize(0)
-  // .setSortKey(element.zOrder())
-  // .setMinZoom(12);
-  // }
+  // public void process(Tables.OsmShipwayLinestring element, FeatureCollector features) {
+  //   if (!nullOrEmpty(element.name())) {
+  //     features.line(LAYER_NAME)
+  //       .setBufferPixels(BUFFER_SIZE)
+  //       .setBufferPixelOverrides(MIN_LENGTH)
+  //       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+  //       .setAttr(Fields.CLASS, element.shipway())
+  //       .setMinPixelSize(0)
+  //       .setSortKey(element.zOrder())
+  //       .setMinZoom(12);
+  //   }
   // }
 
   @Override

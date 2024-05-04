@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, MapTiler.com & OpenMapTiles contributors.
+Copyright (c) 2024, MapTiler.com & OpenMapTiles contributors.
 All rights reserved.
 
 Code license: BSD 3-Clause License
@@ -35,6 +35,7 @@ See https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md for deta
 */
 package org.openmaptiles.layers;
 
+import static org.openmaptiles.util.Utils.coalesce;
 import static org.openmaptiles.util.Utils.nullIfEmpty;
 
 import com.carrotsearch.hppc.LongObjectMap;
@@ -52,6 +53,7 @@ import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
 import com.onthegomap.planetiler.util.Translations;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentSkipListMap;
 import org.locationtech.jts.geom.Geometry;
 import org.slf4j.Logger;
@@ -80,14 +82,17 @@ public class WaterName implements
    */
 
   private static final Logger LOGGER = LoggerFactory.getLogger(WaterName.class);
-  private static final double WORLD_AREA_FOR_4K_SQUARE_METERS =
-    Math.pow(GeoUtils.metersToPixelAtEquator(0, Math.sqrt(70_000)) / 256d, 2);
-  private static final double LOG2 = Math.log(2);
+  private static final Set<String> SEA_OR_OCEAN_PLACE = Set.of("sea", "ocean");
+  private static final double IMPORTANT_MARINE_REGIONS_JOIN_DISTANCE =
+    GeoUtils.metersToPixelAtEquator(0, 50_000) / 256d;
+  private static final int MINZOOM_BAY = 9;
+  private static final int MINZOOM_LAKE = 3;
+  private static final int MINZOOM_SEA_AND_OCEAN = 0;
   private final Translations translations;
   // need to synchronize updates from multiple threads
   private final LongObjectMap<Geometry> lakeCenterlines = Hppc.newLongObjectHashMap();
   // may be updated concurrently by multiple threads
-  private final ConcurrentSkipListMap<String, Integer> importantMarinePoints = new ConcurrentSkipListMap<>();
+  private final ConcurrentSkipListMap<String, NaturalEarthRegion> importantMarinePoints = new ConcurrentSkipListMap<>();
   private final Stats stats;
 
   public WaterName(Translations translations, PlanetilerConfig config, Stats stats) {
@@ -135,37 +140,77 @@ public class WaterName implements
       Integer scalerank = Parse.parseIntOrNull(feature.getTag("scalerank"));
       if (name != null && scalerank != null) {
         name = getMarinePointName(name);
-        importantMarinePoints.put(name, scalerank);
+        try {
+          importantMarinePoints.put(name, new NaturalEarthRegion(feature.worldGeometry(), scalerank));
+        } catch (GeometryException e) {
+          e.log(stats, "ne_marine_polys",
+            "Error getting geometry for natural earth feature " + table + " " + feature.getTag("ogc_fid"));
+        }
       }
     }
+  }
+
+  private NaturalEarthRegion getImportantMarineRegion(Tables.OsmMarinePoint element) {
+    var source = element.source();
+    String name = element.name().toLowerCase();
+    NaturalEarthRegion result = importantMarinePoints.get(name);
+    if (result == null) {
+      result = importantMarinePoints.get(source.getString("name:en", "").toLowerCase());
+    }
+    if (result == null) {
+      result = importantMarinePoints.get(source.getString("name:es", "").toLowerCase());
+    }
+    if (result == null) {
+      Map.Entry<String, NaturalEarthRegion> next = importantMarinePoints.ceilingEntry(name);
+      if (next != null && next.getKey().startsWith(name)) {
+        result = next.getValue();
+      }
+    }
+
+    if (result == null) {
+      return null;
+    }
+    try {
+      double distance = result.geometry.distance(source.worldGeometry());
+      if (distance <= IMPORTANT_MARINE_REGIONS_JOIN_DISTANCE) {
+        return result;
+      }
+    } catch (GeometryException e) {
+      e.log(stats, "osm_marine_point",
+        "Error getting geometry for OSM marine point " + element.source().id());
+    }
+
+    return null;
   }
 
   @Override
   public void process(Tables.OsmMarinePoint element, FeatureCollector features) {
     if (!element.name().isBlank()) {
-      String place = element.place();
+      String clazz = coalesce(
+        nullIfEmpty(element.natural()),
+        nullIfEmpty(element.place())
+      );
       var source = element.source();
       // use name from OSM, but get min zoom from natural earth based on fuzzy name match...
       Integer rank = Parse.parseIntOrNull(source.getTag("rank"));
-      String name = getMarinePointName(element.name());
-      Integer nerank;
-      if ((nerank = importantMarinePoints.get(name)) != null) {
-        rank = nerank;
-      } else if ((nerank = importantMarinePoints.get(getMarinePointName(source.getString("name:en", "")))) != null) {
-        rank = nerank;
-      } else if ((nerank = importantMarinePoints.get(getMarinePointName(source.getString("name:es", "")))) != null) {
-        rank = nerank;
-      } else {
-        Map.Entry<String, Integer> next = importantMarinePoints.ceilingEntry(name);
-        if (next != null && next.getKey().startsWith(name)) {
-          rank = next.getValue();
-        }
+      NaturalEarthRegion neRegion = getImportantMarineRegion(element);
+      if (neRegion != null) {
+        rank = neRegion.scalerank;
       }
-      int minZoom = "ocean".equals(place) ? 0 : rank != null ? rank : 8;
+      int minZoom;
+      if ("ocean".equals(element.place())) {
+        minZoom = 0;
+      } else if (rank != null) {
+        minZoom = rank;
+      } else if ("bay".equals(element.natural())) {
+        minZoom = 13;
+      } else {
+        minZoom = 8;
+      }
       features.point(LAYER_NAME)
         .setBufferPixels(BUFFER_SIZE)
         .putAttrs(OmtLanguageUtils.getNames(source.tags(), translations))
-        .setAttr(Fields.CLASS, place)
+        .setAttr(Fields.CLASS, clazz)
         .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
         .setMinZoom(minZoom);
     }
@@ -174,33 +219,53 @@ public class WaterName implements
   @Override
   public void process(Tables.OsmWaterPolygon element, FeatureCollector features) {
     if (nullIfEmpty(element.name()) != null && !element.source().hasTag("amenity")) {
-      try {
-        Geometry centerlineGeometry = lakeCenterlines.get(element.source().id());
-        FeatureCollector.Feature feature = null;
-        int minzoom = 9;
-        Geometry geometry = element.source().worldGeometry();
-        double area = geometry.getArea();
-        minzoom = (int) Math.floor(20 - Math.log(area / WORLD_AREA_FOR_4K_SQUARE_METERS) / LOG2);
-        minzoom = Math.min(14, Math.max(4, minzoom));
-        if (centerlineGeometry != null) {
-          // prefer lake centerline if it exists
-          feature = features.geometry(LAYER_NAME, centerlineGeometry)
+      Geometry centerlineGeometry = lakeCenterlines.get(element.source().id());
+      int minzoomCL = MINZOOM_BAY;
+      String place = element.place();
+      String clazz;
+      if ("bay".equals(element.natural())) {
+        clazz = FieldValues.CLASS_BAY;
+      } else if ("sea".equals(place)) {
+        clazz = FieldValues.CLASS_SEA;
+      } else {
+        clazz = FieldValues.CLASS_LAKE;
+        minzoomCL = MINZOOM_LAKE;
+      }
+      if (centerlineGeometry != null) {
+        // prefer lake centerline if it exists, but point will be also used if minzoom below 9 is calculated from area
+        // note: Here we're diverging from OpenMapTiles: For bays with minzoom (based on area) point is used between
+        // minzoom and Z8 and for Z9+ centerline is used, while OpenMaptiles sticks with points.
+        setupOsmWaterPolygonFeature(
+          element, features.geometry(LAYER_NAME, centerlineGeometry), clazz, minzoomCL)
             .setMinPixelSizeBelowZoom(13, 6d * element.name().length());
-        } else if (!"riverbank".equals(element.waterway()) && !"river".equals(element.water())) {
-          // otherwise just use a label point inside the lake
-          feature = features.pointOnSurface(LAYER_NAME);
-        }
-        if (feature != null) {
-          feature
-          .setAttr(Fields.CLASS, FieldValues.CLASS_LAKE)
-          .setBufferPixels(BUFFER_SIZE)
-          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-          .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
-          .setMinZoom(minzoom);
-        }
-      } catch (GeometryException e) {
-        e.log(stats, "omt_water_polygon", "Unable to get geometry for water polygon " + element.source().id());
+      }
+
+      int minzoom = place != null && SEA_OR_OCEAN_PLACE.contains(place) ? MINZOOM_SEA_AND_OCEAN : MINZOOM_LAKE;
+      if (centerlineGeometry == null || minzoom < minzoomCL) {
+        // use a label point inside the lake but ...
+        // ... if centerline already created, adjust maxzoom here to make sure we're not having both at same zoom level
+        int maxzoom = centerlineGeometry != null ? minzoomCL - 1 : 14;
+        setupOsmWaterPolygonFeature(element, features.pointOnSurface(LAYER_NAME), clazz, minzoom)
+          .setMaxZoom(maxzoom)
+          // Show a label if a water feature covers at least 1/4 of a tile or z14+
+          .setMinPixelSizeBelowZoom(13, 128);
       }
     }
   }
+
+  private FeatureCollector.Feature setupOsmWaterPolygonFeature(Tables.OsmWaterPolygon element,
+    FeatureCollector.Feature output, String clazz, int minzoom) {
+    output
+      .setAttr(Fields.CLASS, clazz)
+      .setBufferPixels(BUFFER_SIZE)
+      .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+      .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
+      .setMinZoom(minzoom);
+    return output;
+  }
+
+  private record NaturalEarthRegion(
+    Geometry geometry,
+    int scalerank
+  ) {}
 }

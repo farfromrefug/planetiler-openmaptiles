@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, MapTiler.com & OpenMapTiles contributors.
+Copyright (c) 2024, MapTiler.com & OpenMapTiles contributors.
 All rights reserved.
 
 Code license: BSD 3-Clause License
@@ -45,8 +45,6 @@ import com.carrotsearch.hppc.LongObjectMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.VectorTile;
-import org.openmaptiles.OpenMapTilesProfile;
-import org.openmaptiles.generated.OpenMapTilesSchema;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
@@ -79,6 +77,10 @@ import org.locationtech.jts.geom.prep.PreparedGeometry;
 import org.locationtech.jts.geom.prep.PreparedGeometryFactory;
 import org.locationtech.jts.operation.linemerge.LineMerger;
 import org.locationtech.jts.operation.polygonize.Polygonizer;
+import org.openmaptiles.OpenMapTilesProfile;
+import org.openmaptiles.generated.OpenMapTilesSchema;
+import org.openmaptiles.generated.Tables;
+import org.openmaptiles.util.OmtLanguageUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,12 +96,13 @@ import org.slf4j.LoggerFactory;
  * files</a>.
  */
 public class Boundary implements
-    OpenMapTilesSchema.Boundary,
-    OpenMapTilesProfile.NaturalEarthProcessor,
-    OpenMapTilesProfile.OsmRelationPreprocessor,
-    OpenMapTilesProfile.OsmAllProcessor,
-    OpenMapTilesProfile.FeaturePostProcessor,
-    OpenMapTilesProfile.FinishHandler {
+  OpenMapTilesSchema.Boundary,
+  OpenMapTilesProfile.NaturalEarthProcessor,
+  OpenMapTilesProfile.OsmRelationPreprocessor,
+  OpenMapTilesProfile.OsmAllProcessor,
+  Tables.OsmBoundaryPolygon.Handler,
+  OpenMapTilesProfile.FeaturePostProcessor,
+  OpenMapTilesProfile.FinishHandler {
 
   /*
    * Uses natural earth at lower zoom levels and OpenStreetMap at higher zoom
@@ -123,6 +126,8 @@ public class Boundary implements
 
   private static final Logger LOGGER = LoggerFactory.getLogger(Boundary.class);
   private static final double COUNTRY_TEST_OFFSET = GeoUtils.metersToPixelAtEquator(0, 10) / 256d;
+  private static final String COUNTRY_KE = "Kenya";
+  private static final String COUNTRY_SS = "South Sudan";
   private final Stats stats;
   private final boolean addCountryNames;
   // may be updated concurrently by multiple threads
@@ -131,6 +136,7 @@ public class Boundary implements
   private final Map<Long, List<Geometry>> regionGeometries = new HashMap<>();
   private final Map<CountryBoundaryComponent, List<Geometry>> boundariesToMerge = new HashMap<>();
   private final PlanetilerConfig config;
+  private final Translations translations;
 
   private final Translations translations;
 
@@ -174,8 +180,21 @@ public class Boundary implements
     BoundaryInfo info = switch (table) {
       case "ne_110m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 0, 0);
       case "ne_50m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 1, 3);
-      case "ne_10m_admin_0_boundary_lines_land" ->
-        feature.hasTag("featurecla", "Lease Limit") ? null : new BoundaryInfo(2, 4, 4);
+      case "ne_10m_admin_0_boundary_lines_land" -> {
+        boolean isDisputedSouthSudanAndKenya = false;
+        if (disputed) {
+          String left = feature.getString("adm0_left");
+          String right = feature.getString("adm0_right");
+          if (COUNTRY_SS.equals(left)) {
+            isDisputedSouthSudanAndKenya = COUNTRY_KE.equals(right);
+          } else if (COUNTRY_KE.equals(left)) {
+            isDisputedSouthSudanAndKenya = COUNTRY_SS.equals(right);
+          }
+        }
+        yield isDisputedSouthSudanAndKenya ? new BoundaryInfo(2, 1, 4) :
+          feature.hasTag("featurecla", "Lease limit") ? null :
+          new BoundaryInfo(2, 4, 4);
+      }
       case "ne_10m_admin_1_states_provinces_lines" -> {
         Double minZoom = Parse.parseDoubleOrNull(feature.getTag("min_zoom"));
         yield minZoom != null && minZoom <= 7 ? new BoundaryInfo(4, 2, 4)
@@ -269,6 +288,7 @@ public class Boundary implements
           // save for later
           try {
             CountryBoundaryComponent component = minAdminLevel <= 2 ? new CountryBoundaryComponent(
+                feature.id(),
                 minAdminLevel,
                 disputed,
                 maritime,
@@ -323,6 +343,15 @@ public class Boundary implements
   }
 
   @Override
+  public void process(Tables.OsmBoundaryPolygon element, FeatureCollector features) {
+    features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+      .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+      .setAttr(OpenMapTilesSchema.Boundary.Fields.CLASS, element.boundary())
+      .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
+      .setMinZoom(4);
+  }
+
+  @Override
   public void finish(String sourceName, FeatureCollector.Factory featureCollectors,
       Consumer<FeatureCollector.Feature> emit) {
     if (OpenMapTilesProfile.OSM_SOURCE.equals(sourceName)) {
@@ -341,26 +370,25 @@ public class Boundary implements
             if (merged instanceof LineString lineString) {
               BorderingRegions borderingRegions = getBorderingRegions(countryBoundaries, key.regions, lineString);
 
-              var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString));
-              features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-                  .setPixelToleranceFactor(3.0)
-                  .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
-                  .setAttr(Fields.DISPUTED, key.disputed ? 1 : null)
-                  .setAttr(Fields.MARITIME, key.maritime ? 1 : null)
-                  .setAttr(Fields.CLAIMED_BY, key.claimedBy)
-                  .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
-                  .setAttr(Fields.ADM0_L,
-                      (borderingRegions == null || borderingRegions.left == null) ? null
-                          : regionNames.get(borderingRegions.left))
-                  .setAttr(Fields.ADM0_R,
-                      (borderingRegions == null || borderingRegions.right == null) ? null
-                          : regionNames.get(borderingRegions.right))
-                  .setMinPixelSizeAtAllZooms(0)
-                  .setMinZoom(key.minzoom);
-
-              for (var feature : features) {
-                emit.accept(feature);
-              }
+            var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString, key.id));
+            var newFeature = features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+              .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
+              .setAttr(Fields.DISPUTED, key.disputed ? 1 : 0)
+              .setAttr(Fields.MARITIME, key.maritime ? 1 : 0)
+              .setAttr(Fields.CLAIMED_BY, key.claimedBy)
+              .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
+              .setMinPixelSizeAtAllZooms(0)
+              .setMinZoom(key.minzoom);
+            if (key.adminLevel == 2 && !key.disputed) {
+              // only non-disputed admin 2 boundaries get to have adm0_{l,r}, at zoom 5 and more
+              newFeature
+                .setAttrWithMinzoom(Fields.ADM0_L,
+                  borderingRegions.left == null ? null : regionNames.get(borderingRegions.left), 5)
+                .setAttrWithMinzoom(Fields.ADM0_R,
+                  borderingRegions.right == null ? null : regionNames.get(borderingRegions.right), 5);
+            }
+            for (var feature : features) {
+              emit.accept(feature);
             }
           }
           // } else if (key.adminLevel == 4 || key.adminLevel == 6) {
@@ -527,17 +555,19 @@ public class Boundary implements
    * determine the left/right region ID later.
    */
   private record CountryBoundaryComponent(
-      int adminLevel,
-      boolean disputed,
-      boolean maritime,
-      int minzoom,
-      Geometry line,
-      Set<Long> regions,
-      String claimedBy,
-      String name) {
+    long id,
+    int adminLevel,
+    boolean disputed,
+    boolean maritime,
+    int minzoom,
+    Geometry line,
+    Set<Long> regions,
+    String claimedBy,
+    String name
+  ) {
 
     CountryBoundaryComponent groupingKey() {
-      return new CountryBoundaryComponent(adminLevel, disputed, maritime, minzoom, null, regions, claimedBy, name);
+      return new CountryBoundaryComponent(id, adminLevel, disputed, maritime, minzoom, null, regions, claimedBy, name);
     }
   }
 }

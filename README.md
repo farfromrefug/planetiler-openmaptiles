@@ -26,11 +26,12 @@ available options.
 ## Differences from OpenMapTiles
 
 - Road name abbreviations are not implemented yet in the `transportation_name` layer
-- `agg_stop` tag not implemented yet in the `poi` layer
 - `brunnel` tag is excluded from `transportation_name` layer to avoid breaking apart long `transportation_name`
   lines, to revert this behavior set `--transportation-name-brunnel=true`
 - `rank` field on `mountain_peak` linestrings only has 3 levels (1: has wikipedia page and name, 2: has name, 3: no name
   or wikipedia page or name)
+- Some line and polygon tolerances are different, can be tweaked with `--simplify-tolerance` parameter
+- For bigger bays whose label points show above Z9, centerline is used for Z9+
 
 ## Customizing
 
@@ -45,7 +46,7 @@ the [layers package](src/main/java/org/openmaptiles/layers), and make a change t
 Example adding an attribute to a built-in layer
 </summary>
 
-For example to copy over the source attribute from OpenStreetMap elements to the building layer,
+For example to copy over the name attribute from OpenStreetMap elements to the building layer,
 modify [Building.java](src/main/java/org/openmaptiles/layers/Building.java):
 
 ```diff
@@ -53,7 +54,7 @@ modify [Building.java](src/main/java/org/openmaptiles/layers/Building.java):
          .setAttrWithMinzoom(Fields.RENDER_MIN_HEIGHT, renderMinHeight, 14)
          .setAttrWithMinzoom(Fields.COLOUR, color, 14)
          .setAttrWithMinzoom(Fields.HIDE_3D, hide3d, 14)
-+        .setAttrWithMinzoom("source", element.source().getTag("source"), 14)
++        .setAttrWithMinzoom("name", element.source().getTag("name"), 14)
          .setSortKey(renderHeight);
        if (mergeZ13Buildings) {
          feature
@@ -149,7 +150,7 @@ script with the
 OpenMapTiles release tag:
 
 ```bash
-./scripts/regenerate-openmaptiles.sh v3.14
+./scripts/regenerate-openmaptiles.sh v3.15
 ```
 
 Then follow the instructions it prints for reformatting generated code.
@@ -157,7 +158,7 @@ Then follow the instructions it prints for reformatting generated code.
 If you want to regenerate from a different repository than the default openmaptiles, you can specify the url like this:
 
 ```bash
-./scripts/regenerate-openmaptiles.sh v3.14 https://raw.githubusercontent.com/openmaptiles/openmaptiles/
+./scripts/regenerate-openmaptiles.sh v3.15 https://raw.githubusercontent.com/openmaptiles/openmaptiles/
 ```
 
 ## License
@@ -165,8 +166,8 @@ If you want to regenerate from a different repository than the default openmapti
 All code in this repository is under the [BSD license](./LICENSE.md) and the cartography decisions encoded in the schema
 and SQL are licensed under [CC-BY](./LICENSE.md).
 
-Products or services using maps derived from OpenMapTiles schema need to visibly credit "OpenMapTiles.org" or
-reference "OpenMapTiles" with a link to https://openmaptiles.org/. Exceptions to attribution requirement can be granted
+Products or services using maps derived from OpenMapTiles schema need to **visibly credit "OpenMapTiles.org"** or
+**reference "OpenMapTiles"** with a link to https://openmaptiles.org/. Exceptions to attribution requirement can be granted
 on request.
 
 For a browsable electronic map based on OpenMapTiles and OpenStreetMap data, the

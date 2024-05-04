@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, MapTiler.com & OpenMapTiles contributors.
+Copyright (c) 2024, MapTiler.com & OpenMapTiles contributors.
 All rights reserved.
 
 Code license: BSD 3-Clause License
@@ -42,9 +42,6 @@ import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
-import org.openmaptiles.OpenMapTilesProfile;
-import org.openmaptiles.generated.OpenMapTilesSchema;
-import org.openmaptiles.generated.Tables;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.SourceFeature;
@@ -57,6 +54,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
+import org.openmaptiles.OpenMapTilesProfile;
+import org.openmaptiles.generated.OpenMapTilesSchema;
+import org.openmaptiles.generated.Tables;
 
 /**
  * Defines the logic for generating map elements for man-made land use polygons like cemeteries, zoos, and hospitals in
@@ -76,6 +77,14 @@ public class Landuse implements
     7, 2,
     6, 1
   ));
+  private static final TreeMap<Integer, Double> MINDIST_AND_BUFFER_SIZES = new TreeMap<>(Map.of(
+    5, 0.1,
+    // there is quite huge jump between Z5:NE and Z6:OSM => bigger generalization needed to make the transition more smooth
+    6, 0.5,
+    7, 0.25,
+    8, 0.125,
+    Integer.MAX_VALUE, 0.1
+  ));
   private static final Set<String> Z6_CLASSES = Set.of(
     FieldValues.CLASS_RESIDENTIAL,
     FieldValues.CLASS_SUBURB,
@@ -93,11 +102,10 @@ public class Landuse implements
   public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
     if ("ne_50m_urban_areas".equals(table)) {
       Double scalerank = Parse.parseDoubleOrNull(feature.getTag("scalerank"));
-      // if (scalerank != null && scalerank <= 2) {
+      int minzoom = (scalerank != null && scalerank <= 2) ? 4 : 5;
       features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .setAttr(Fields.CLASS, FieldValues.CLASS_RESIDENTIAL)
-        .setZoomRange(scalerank != null && scalerank <= 2 ? 4 : 5, 5);
-      // }
+        .setZoomRange(minzoom, 5);
     }
   }
 
@@ -149,11 +157,15 @@ public class Landuse implements
     //     result.add(item);
     //   }
     // }
-    var merged = zoom <= 12 ?
-      FeatureMerge.mergeNearbyPolygons(items, config.minFeatureSize(zoom), 1, 0.1, 0.1) :
+    List<VectorTile.Feature> merged;
+    if (zoom <= 12) {
+      double minDistAndBuffer = MINDIST_AND_BUFFER_SIZES.ceilingEntry(zoom).getValue();
+      merged = FeatureMerge.mergeNearbyPolygons(items, 1, 1, minDistAndBuffer, minDistAndBuffer);
+    } else {
       // reduces size of some heavy z13-14 tiles with lots of small polygons
-      FeatureMerge.mergeMultiPolygon(items);
-    // result.addAll(merged);
-    return merged;
+      merged = FeatureMerge.mergeMultiPolygon(items);
+    }
+    result.addAll(merged);
+    return result;
   }
 }

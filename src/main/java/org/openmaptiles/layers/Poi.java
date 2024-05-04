@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021, MapTiler.com & OpenMapTiles contributors.
+Copyright (c) 2024, MapTiler.com & OpenMapTiles contributors.
 All rights reserved.
 
 Code license: BSD 3-Clause License
@@ -45,17 +45,29 @@ import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
-import org.openmaptiles.generated.OpenMapTilesSchema;
-import org.openmaptiles.generated.Tables;
-import org.openmaptiles.util.OmtLanguageUtils;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.expression.MultiExpression;
+import com.onthegomap.planetiler.geo.GeoUtils;
+import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
 import com.onthegomap.planetiler.util.Translations;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
+import org.locationtech.jts.geom.Point;
+import org.openmaptiles.OpenMapTilesProfile;
+import org.openmaptiles.generated.OpenMapTilesSchema;
+import org.openmaptiles.generated.Tables;
+import org.openmaptiles.util.OmtLanguageUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Defines the logic for generating map elements for things like shops, parks, and schools in the {@code poi} layer from
@@ -68,13 +80,15 @@ public class Poi implements
   OpenMapTilesSchema.Poi,
   Tables.OsmPoiPoint.Handler,
   Tables.OsmPoiPolygon.Handler,
-  ForwardingProfile.FeaturePostProcessor {
+  ForwardingProfile.FeaturePostProcessor,
+  OpenMapTilesProfile.FinishHandler {
 
   /*
    * process() creates the raw POI feature from OSM elements and postProcess()
    * assigns the feature rank from order in the tile at render-time.
    */
 
+  private static final Logger LOGGER = LoggerFactory.getLogger(Poi.class);
   private static final Map<String, Integer> CLASS_RANKS = Map.ofEntries(
     entry(FieldValues.CLASS_HOSPITAL, 20),
     entry(FieldValues.CLASS_RAILWAY, 40),
@@ -112,12 +126,25 @@ public class Poi implements
     entry("bicycle_repair_station", 900),
     entry("viewpoint", 1_001)
   );
+  private static final Set<String> UNIVERSITY_POI_SUBCLASSES = Set.of("university", "college");
+  private static final List<String> AGG_STOP_SUBCLASS_ORDER = List.of(
+    "subway",
+    "tram_stop",
+    "bus_station",
+    "bus_stop"
+  );
+  private static final Comparator<Tables.OsmPoiPoint> BY_SUBCLASS = Comparator
+    .comparingInt(s -> AGG_STOP_SUBCLASS_ORDER.indexOf(s.subclass()));
+  private static final Set<String> BRAND_OPERATOR_REF_SUBCLASSES = Set.of("charging_station", "parcel_locker");
   private final MultiExpression.Index<String> classMapping;
   private final Translations translations;
+  private final Stats stats;
+  private final Map<String, List<Tables.OsmPoiPoint>> aggStops = new HashMap<>();
 
   public Poi(Translations translations, PlanetilerConfig config, Stats stats) {
     this.classMapping = FieldMappings.Class.index();
     this.translations = translations;
+    this.stats = stats;
   }
 
   static int poiClassRank(String clazz,String subclazz) {
@@ -125,6 +152,11 @@ public class Poi implements
   }
 
   private String poiClass(String subclass, String mappingKey) {
+    // Special case subclass collision between office=university and amenity=university
+    if ("amenity".equals(mappingKey) && "university".equals(subclass)) {
+      return FieldValues.CLASS_COLLEGE;
+    }
+
     subclass = coalesce(subclass, "");
     return classMapping.getOrElse(Map.of(
       "subclass", subclass,
@@ -145,18 +177,112 @@ public class Poi implements
   }
 
   @Override
+  public void release() {
+    aggStops.clear();
+  }
+
+  @Override
   public void process(Tables.OsmPoiPoint element, FeatureCollector features) {
-    // TODO handle uic_ref => agg_stop
-    setupPoiFeature(element, features.point(LAYER_NAME));
+    if (element.uicRef() != null && AGG_STOP_SUBCLASS_ORDER.contains(element.subclass())) {
+      // multiple threads may update this concurrently
+      String aggStopKey = element.uicRef()
+        .concat(coalesce(nullIfEmpty(element.name()), ""))
+        .concat(coalesce(nullIfEmpty(element.network()), ""))
+        .concat(coalesce(nullIfEmpty(element.operator()), ""));
+      synchronized (this) {
+        aggStops.computeIfAbsent(aggStopKey, key -> new ArrayList<>()).add(element);
+      }
+    } else {
+      setupPoiFeature(element, features.point(LAYER_NAME), null);
+    }
+  }
+
+  private void processAggStop(Tables.OsmPoiPoint element, FeatureCollector.Factory featureCollectors,
+    Consumer<FeatureCollector.Feature> emit, Integer aggStop) {
+    try {
+      var features =
+        featureCollectors.get(SimpleFeature.fromWorldGeometry(element.source().worldGeometry(), element.source().id()));
+      setupPoiFeature(element, features.point(LAYER_NAME), aggStop);
+      for (var feature : features) {
+        emit.accept(feature);
+      }
+    } catch (GeometryException e) {
+      e.log(stats, "agg_stop_geometry_2",
+        "Error getting geometry for the stop " + element.source().id() + " (agg_stop)");
+    }
+  }
+
+  /**
+   * We've put aside some stops for {@code agg_stop} processing and we do that processing here.
+   * <p>
+   * The main point is to group together stops with same {@code uid_ref} and then order them first based on subclass
+   * (see {@code AGG_STOP_ORDER}) and then based on distance from centroid (calculated from all the stops). The first
+   * one gets {@code agg_stop=1}, the rest will be "normal" (e.g. no {@code agg_stop} attribute).
+   * <p>
+   * ref: <a href=
+   * "https://github.com/openmaptiles/openmaptiles/blob/master/layers/poi/poi_stop_agg.sql#L26,L28">poi_stop_agg.sql</a>
+   */
+  @Override
+  public void finish(String sourceName, FeatureCollector.Factory featureCollectors,
+    Consumer<FeatureCollector.Feature> emit) {
+    if (OpenMapTilesProfile.OSM_SOURCE.equals(sourceName)) {
+      var timer = stats.startStage("agg_stop");
+      LOGGER.info("Processing {} agg_stop sets", aggStops.size());
+
+      for (var aggStopSet : aggStops.values()) {
+        if (aggStopSet.size() == 1) {
+          processAggStop(aggStopSet.getFirst(), featureCollectors, emit, 1);
+          continue;
+        }
+        Tables.OsmPoiPoint nearest = null;
+        try {
+          // find most important stops based on subclass
+          var firstSubclass = aggStopSet.stream().min(BY_SUBCLASS).get().subclass();
+          var topAggStops =
+            aggStopSet.stream().filter(s -> firstSubclass.equals(s.subclass())).toArray(Tables.OsmPoiPoint[]::new);
+
+          // calculate the centroid and ...
+          List<Point> aggStopPoints = new ArrayList<>(aggStopSet.size());
+          for (var aggStop : aggStopSet) {
+            aggStopPoints.add(aggStop.source().worldGeometry().getCentroid());
+          }
+          var aggStopCentroid = GeoUtils.combinePoints(aggStopPoints).getCentroid();
+
+          // ... find one stop nearest to the centroid
+          double minDistance = Double.MAX_VALUE;
+          for (var aggStop : topAggStops) {
+            double distance = aggStopCentroid.distance(aggStop.source().worldGeometry());
+            if (distance < minDistance || nearest == null ||
+              (distance == minDistance && aggStop.source().id() < nearest.source().id())) {
+              minDistance = distance;
+              nearest = aggStop;
+            }
+          }
+        } catch (GeometryException e) {
+          e.log(stats, "agg_stop_geometry_1",
+            "Error getting geometry for some of the stops with UIC ref. " + aggStopSet.getFirst().uicRef() +
+              " (agg_stop)");
+          // we're not able to calculate agg_stop, so simply dump the stops as they are
+          nearest = null;
+        }
+
+        // now emit the stops
+        final Tables.OsmPoiPoint nearestFinal = nearest; // final needed for lambda
+        aggStopSet
+          .forEach(s -> processAggStop(s, featureCollectors, emit, s == nearestFinal ? 1 : null));
+      }
+
+      timer.stop();
+    }
   }
 
   @Override
   public void process(Tables.OsmPoiPolygon element, FeatureCollector features) {
-    setupPoiFeature(element, features.centroidIfConvex(LAYER_NAME));
+    setupPoiFeature(element, features.centroidIfConvex(LAYER_NAME), null);
   }
 
-  private <T extends Tables.WithSubclass & Tables.WithStation & Tables.WithFunicular & Tables.WithSport & Tables.WithInformation & Tables.WithReligion & Tables.WithMappingKey & Tables.WithName & Tables.WithIndoor & Tables.WithLayer & Tables.WithSource> void setupPoiFeature(
-    T element, FeatureCollector.Feature output) {
+  private <T extends Tables.WithSubclass & Tables.WithStation & Tables.WithFunicular & Tables.WithSport & Tables.WithInformation & Tables.WithReligion & Tables.WithMappingKey & Tables.WithName & Tables.WithIndoor & Tables.WithLayer & Tables.WithSource & Tables.WithOperator & Tables.WithNetwork & Tables.WithBrand & Tables.WithRef> void setupPoiFeature(
+    T element, FeatureCollector.Feature output, Integer aggStop) {
     String rawSubclass = element.subclass();
     if ("station".equals(rawSubclass) && "subway".equals(element.station())) {
       rawSubclass = "subway";
@@ -169,6 +295,27 @@ public class Poi implements
     //   rawSubclass = "halt";
     // }
     String poiClass = poiClass(rawSubclass, element.mappingKey());
+    // // ATM names fall back to operator, or else network
+    // String name = element.name();
+    // var tags = element.source().tags();
+    // if ("atm".equals(rawSubclass) && nullOrEmpty(name)) {
+    //   name = coalesce(nullIfEmpty(element.operator()), nullIfEmpty(element.network()));
+    //   if (name != null) {
+    //     tags.put("name", name);
+    //   }
+    // }
+
+    // // Parcel locker without name: use either brand or operator and add ref if present
+    // if (BRAND_OPERATOR_REF_SUBCLASSES.contains(rawSubclass) && nullOrEmpty(name)) {
+    //   name = coalesce(nullIfEmpty(element.brand()), nullIfEmpty(element.operator()));
+    //   String ref = nullIfEmpty(element.ref());
+    //   if (ref != null) {
+    //     name = name == null ? ref : (name + " " + ref);
+    //   }
+    //   if (name != null) {
+    //     tags.put("name", name);
+    //   }
+    // }
 
     String subclass = switch (rawSubclass) {
       case "information" -> nullIfEmpty(element.information());
@@ -181,6 +328,13 @@ public class Poi implements
     String name = nullOrEmpty(element.name())  && "viewpoint".equals(rawSubclass) ? (String) element.source().getTag("description") : element.name() ;
     int rankOrder = poiClassRank + (nullOrEmpty(name) ? 2000 : 0);
     var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
+    int minzoom = minzoom(poiClass, element.subclass(), element.mappingKey());
+    if (UNIVERSITY_POI_SUBCLASSES.contains(rawSubclass)) {
+      // universities that are at least 10% of a tile may appear from Z10
+      output.setMinPixelSizeBelowZoom(13, 80); // 80x80px is ~10% of a 256x256px tile
+      minzoom = 10;
+    }
+
     output.setBufferPixels(BUFFER_SIZE)
       .setAttr(Fields.CLASS, poiClass)
       .setAttr(Fields.SUBCLASS, subclass)
@@ -194,7 +348,7 @@ public class Poi implements
       .setAttr(Fields.INDOOR, element.indoor() ? 1 : null)
       .putAttrs(names)
       .setPointLabelGridPixelSize(14, 64)
-      .setMinZoom(minzoom(poiClass, element.subclass(), element.mappingKey()));
+      .setMinZoom(minzoom);
 
     if (names.isEmpty() && !nullOrEmpty(name)) {
       output.setAttr(Fields.NAME, name);
