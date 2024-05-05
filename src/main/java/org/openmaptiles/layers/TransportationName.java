@@ -115,6 +115,11 @@ public class TransportationName implements
     .put(9, 8_000)
     .put(10, 4_000)
     .put(11, 2_000);
+  private static final ZoomFunction<Number> BUFFER_PIXEL_OVERRIDES =
+    ZoomFunction.fromMaxZoomThresholds(Map.of(
+      13, 256,
+      6, 256
+    ));
   private final boolean brunnel;
   private final boolean sizeForShield;
   private final boolean limitMerge;
@@ -243,22 +248,19 @@ public class TransportationName implements
     boolean isLink = Transportation.isLink(highway);
     String baseClass = highwayClass.replace("_construction", "");
 
-    int minzoom = switch (baseClass) {
-      case FieldValues.CLASS_TRUNK -> 8;
-      case FieldValues.CLASS_MOTORWAY -> 6;
-      case FieldValues.CLASS_PRIMARY -> 8;
-      // inherit min zoom threshold from visible road, and ensure we never show a
-      // label on a road that's not visible yet.
-      default -> Math.min(isLink ? 13 : 12, transportation.getMinzoom(element, highwayClass, subclass)); // fallback -
-                                                                                                         // get from
-                                                                                                         // line
-                                                                                                         // minzoom, but
-                                                                                                         // floor at 12
-    };
+    int minzoom = FieldValues.CLASS_TRUNK.equals(baseClass) ? 8 :
+      FieldValues.CLASS_MOTORWAY.equals(baseClass) ? 6 :
+      isLink ? 13 : 12; // fallback - get from line minzoom, but floor at 12
+
+    // inherit min zoom threshold from visible road, and ensure we never show a label on a road that's not visible yet.
+    minzoom = Math.max(minzoom, transportation.getMinzoom(element, highwayClass, subclass));
+    if (minzoom > config.maxzoom()) {
+      return;
+    }
 
     FeatureCollector.Feature feature = features.line(LAYER_NAME)
         .setBufferPixels(BUFFER_SIZE)
-        .setBufferPixelOverrides(MIN_LENGTH)
+        .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
         // TODO abbreviate road names - can't port osml10n because it is AGPL
         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
         .setAttr(Fields.REF, ref)
@@ -324,7 +326,7 @@ public class TransportationName implements
     if (!nullOrEmpty(element.name())) {
       features.line(LAYER_NAME)
           .setBufferPixels(BUFFER_SIZE)
-          .setBufferPixelOverrides(MIN_LENGTH)
+          .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
           .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
           .setAttr(Fields.CLASS, "aerialway")
           .setAttr(Fields.SUBCLASS, element.aerialway())
@@ -339,7 +341,7 @@ public class TransportationName implements
   //   if (!nullOrEmpty(element.name())) {
   //     features.line(LAYER_NAME)
   //       .setBufferPixels(BUFFER_SIZE)
-  //       .setBufferPixelOverrides(MIN_LENGTH)
+  //       .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
   //       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
   //       .setAttr(Fields.CLASS, element.shipway())
   //       .setMinPixelSize(0)

@@ -130,6 +130,7 @@ public class Boundary implements
   private static final String COUNTRY_SS = "South Sudan";
   private final Stats stats;
   private final boolean addCountryNames;
+  private final boolean onlyOsmBoundaries;
   // may be updated concurrently by multiple threads
   private final Map<Long, String> regionNames = new ConcurrentHashMap<>();
   // need to synchronize updates to these shared data structures:
@@ -144,6 +145,11 @@ public class Boundary implements
         "boundary_country_names",
         "boundary layer: add left/right codes of neighboring countries",
         true);
+    this.onlyOsmBoundaries = config.arguments().getBoolean(
+      "boundary_osm_only",
+      "boundary layer: only use OSM, even at low zoom levels",
+      false
+    );
     this.stats = stats;
     this.translations = translations;
   }
@@ -172,9 +178,11 @@ public class Boundary implements
 
   @Override
   public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
-    boolean disputed = feature.getString("featurecla", "").startsWith("Disputed");
-    record BoundaryInfo(int adminLevel, int minzoom, int maxzoom) {
+    if (onlyOsmBoundaries) {
+      return;
     }
+    boolean disputed = feature.getString("featurecla", "").startsWith("Disputed");
+    record BoundaryInfo(int adminLevel, int minzoom, int maxzoom) {}
     BoundaryInfo info = switch (table) {
       case "ne_110m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 0, 0);
       case "ne_50m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 1, 3);
@@ -205,7 +213,6 @@ public class Boundary implements
           .setZoomRange(info.minzoom, info.maxzoom)
           .setMinPixelSizeAtAllZooms(0)
           .setAttr(Fields.ADMIN_LEVEL, info.adminLevel)
-          // .setPixelToleranceFactor(0.5)
           // .setAttr(Fields.MARITIME, 0)
           .setAttr(Fields.DISPUTED, disputed ? 1 : null);
     }
@@ -221,7 +228,6 @@ public class Boundary implements
       if (adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 6) {
         boolean disputed = isDisputed(relation.tags());
         if (code != null) {
-          LOGGER.info("Adding regionNames " + relation.id() + " " + code);
           regionNames.put(relation.id(), code);
         }
         return List.of(new BoundaryRelation(
@@ -265,7 +271,6 @@ public class Boundary implements
         }
         if ((minAdminLevel == 2 || minAdminLevel == 4 || minAdminLevel == 6)
             && regionNames.containsKey(info.relation().id)) {
-          LOGGER.info("Adding regionIds " + info.relation().id);
           regionIds.add(info.relation().id);
         }
       }
@@ -282,10 +287,13 @@ public class Boundary implements
             feature.hasTag("boundary_type", "maritime");
         int minzoom = (maritime && minAdminLevel == 2) ? 4
             : minAdminLevel <= 4 ? 5 : minAdminLevel <= 6 ? 6 : minAdminLevel <= 8 ? 11 : 12;
+        if (onlyOsmBoundaries && minAdminLevel <= 4) {
+          minzoom = minAdminLevel == 2 ? (maritime ? 4 : 0) : 1;
+        }
         if (addCountryNames && !regionIds.isEmpty()) {
           // save for later
           try {
-            CountryBoundaryComponent component = minAdminLevel <= 2 ? new CountryBoundaryComponent(
+            CountryBoundaryComponent component = new CountryBoundaryComponent(
                 feature.id(),
                 minAdminLevel,
                 disputed,
@@ -294,31 +302,30 @@ public class Boundary implements
                 feature.line(),
                 regionIds,
                 claimedBy,
-                disputedName) : null;
+                disputedName);
             // multiple threads may update this concurrently
             synchronized (this) {
-              if (minAdminLevel <= 2) {
-                boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>())
+              // if (minAdminLevel <= 2) {
+              boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>())
                     .add(component.line);
-              }
+              // }
               for (var info : relationInfos) {
-                if (minAdminLevel == 4 || minAdminLevel == 6) {
-                  component = new CountryBoundaryComponent(
-                      feature.id(),
-                      minAdminLevel,
-                      false,
-                      maritime,
-                      minzoom,
-                      feature.line(),
-                      regionIds,
-                      null,
-                      info.relation().name);
-                  boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>())
-                      .add(component.line);
-                }
+                // if (minAdminLevel == 4 || minAdminLevel == 6) {
+                //   component = new CountryBoundaryComponent(
+                //       feature.id(),
+                //       minAdminLevel,
+                //       false,
+                //       maritime,
+                //       minzoom,
+                //       feature.line(),
+                //       regionIds,
+                //       null,
+                //       info.relation().name);
+                //   boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>())
+                //       .add(component.line);
+                // }
                 var rel = info.relation();
                 if (rel.adminLevel <= 2 || rel.adminLevel == 4 || rel.adminLevel == 6) {
-                  LOGGER.info("adding regionGeometries " + rel.id);
                   regionGeometries.computeIfAbsent(rel.id, id -> new ArrayList<>()).add(component.line);
                 }
               }

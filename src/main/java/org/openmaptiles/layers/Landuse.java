@@ -69,21 +69,13 @@ import org.openmaptiles.generated.Tables;
 public class Landuse implements
   OpenMapTilesSchema.Landuse,
   OpenMapTilesProfile.NaturalEarthProcessor,
-  Tables.OsmLandusePolygon.Handler,
-  ForwardingProfile.FeaturePostProcessor {
+  OpenMapTilesProfile.FeaturePostProcessor,
+  Tables.OsmLandusePolygon.Handler {
 
   private static final ZoomFunction<Number> MIN_PIXEL_SIZE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
     13, 4,
     7, 2,
     6, 1
-  ));
-  private static final TreeMap<Integer, Double> MINDIST_AND_BUFFER_SIZES = new TreeMap<>(Map.of(
-    5, 0.1,
-    // there is quite huge jump between Z5:NE and Z6:OSM => bigger generalization needed to make the transition more smooth
-    6, 0.5,
-    7, 0.25,
-    8, 0.125,
-    Integer.MAX_VALUE, 0.1
   ));
   private static final Set<String> Z6_CLASSES = Set.of(
     FieldValues.CLASS_RESIDENTIAL,
@@ -102,10 +94,11 @@ public class Landuse implements
   public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
     if ("ne_50m_urban_areas".equals(table)) {
       Double scalerank = Parse.parseDoubleOrNull(feature.getTag("scalerank"));
-      int minzoom = (scalerank != null && scalerank <= 2) ? 4 : 5;
-      features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-        .setAttr(Fields.CLASS, FieldValues.CLASS_RESIDENTIAL)
-        .setZoomRange(minzoom, 5);
+      if (scalerank != null && scalerank <= 2) {
+        features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+          .setAttr(Fields.CLASS, FieldValues.CLASS_RESIDENTIAL)
+          .setZoomRange(4, 5);
+      }
     }
   }
 
@@ -131,13 +124,21 @@ public class Landuse implements
   public void process(Tables.OsmLandusePolygon element, FeatureCollector features) {
     String clazz = getClass(element);
     if (clazz != null) {
-      features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+      var feature = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .setAttr(Fields.CLASS, clazz)
         .setSimplifyUsingVW(true)
-        .setPixelToleranceFactor(2.2)
+        // .setPixelToleranceFactor(2.2)
         // .setMinPixelSizeFactor(2.5)
-        .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
+        // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(Z6_CLASSES.contains(clazz) ? 6 : 9);
+        if (FieldValues.CLASS_RESIDENTIAL.equals(clazz)) {
+          feature
+            .setMinPixelSize(0.1)
+            .setPixelTolerance(0.25);
+        } else {
+          feature
+            .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS);
+        }
     }
   }
 
@@ -157,14 +158,11 @@ public class Landuse implements
     //     result.add(item);
     //   }
     // }
-    List<VectorTile.Feature> merged;
-    if (zoom <= 12) {
-      double minDistAndBuffer = MINDIST_AND_BUFFER_SIZES.ceilingEntry(zoom).getValue();
-      merged = FeatureMerge.mergeNearbyPolygons(items, 1, 1, minDistAndBuffer, minDistAndBuffer);
-    } else {
+    // return result;
+    var merged = zoom <= 12 ?
+      FeatureMerge.mergeNearbyPolygons(items, 1, 1, 0.1, 0.1) :
       // reduces size of some heavy z13-14 tiles with lots of small polygons
-      merged = FeatureMerge.mergeMultiPolygon(items);
-    }
+      FeatureMerge.mergeMultiPolygon(items);
     result.addAll(merged);
     return result;
   }

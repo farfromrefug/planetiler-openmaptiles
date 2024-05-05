@@ -209,7 +209,7 @@ public class Transportation implements
       entry(FieldValues.CLASS_BUSWAY, 11),
       entry(FieldValues.CLASS_SECONDARY, 9),
       entry(FieldValues.CLASS_PRIMARY, 7),
-      entry(FieldValues.CLASS_TRUNK, 6),
+      entry(FieldValues.CLASS_TRUNK, 5),
       entry(FieldValues.CLASS_MOTORWAY, 4)
     );
   }
@@ -590,7 +590,7 @@ public class Transportation implements
         }
         case FieldValues.CLASS_MOTORWAY -> isMotorwayForZ4(routeRelations) ?
           MINZOOMS.getOrDefault(FieldValues.CLASS_MOTORWAY, Integer.MAX_VALUE) : 5;
-        default -> MINZOOMS.getOrDefault(baseClass, Integer.MAX_VALUE);
+        default -> MINZOOMS.getOrDefault(baseClass, 14);
       };
     }
 
@@ -668,14 +668,15 @@ public class Transportation implements
   //     .setAttr(Fields.CLASS, element.shipway()) // "ferry"
   //     // no subclass
   //     .setAttr(Fields.SERVICE, service(element.service()))
-  //     .setAttr(Fields.ONEWAY, nullIfInt(element.isOneway(), 0))
   //     .setAttr(Fields.RAMP, element.isRamp() ? 1L : null)
   //     .setAttr(Fields.BRUNNEL, brunnel(element.isBridge(), element.isTunnel(), element.isFord()))
   //     .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
   //     .setSortKey(element.zOrder())
   //     .setMinPixelSize(0) // merge during post-processing, then limit by size
-  //     .setMinZoom(11);
+  //     .setMinZoom(4)
+  //     .setMinPixelSizeBelowZoom(10, 32); // `sql_filter: ST_Length(...)` used in OpenMapTiles translates to 32px
   // }
+
   @Override
   public void process(Tables.OsmSkiLinestring element, FeatureCollector features) {
     features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
@@ -683,12 +684,10 @@ public class Transportation implements
       // no subclass
       .setAttr("difficulty", nullIfEmpty(element.difficulty()))
       .setAttr("type", nullIfEmpty(element.pisteType()))
-      .setAttr(Fields.BRUNNEL, brunnel(element.isBridge(), element.isTunnel() || element.isCovered(), element.isFord()))
       .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
       .setSortKey(element.zOrder())
       .setMinPixelSize(0) // merge during post-processing, then limit by size
-      .setMinZoom(4)
-      .setMinPixelSizeBelowZoom(10, 32); // `sql_filter: ST_Length(...)` used in OpenMapTiles translates to 32px
+      .setMinZoom(14);
   }
 
   @Override
@@ -729,7 +728,7 @@ public class Transportation implements
       }
     }
 
-    var merged = FeatureMerge.mergeLineStrings(FeatureMerge.mergeOverlappingPolygons(items, minFeatureSize), minLength, tolerance, BUFFER_SIZE);
+    var merged = FeatureMerge.mergeLineStrings(items, minLength, tolerance, BUFFER_SIZE);
 
     for (var item : merged) {
       item.attrs().remove(LIMIT_MERGE_TAG);
