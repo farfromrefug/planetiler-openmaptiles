@@ -46,6 +46,40 @@ class WaterTest extends AbstractLayerTest {
   }
 
   @Test
+  void testNaturalEarthAntarcticIceShelves() {
+    var ice1 = process(SimpleFeature.create(
+      GeoUtils.worldToLatLonCoords(rectangle(0, Math.sqrt(1))),
+      Map.of(),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_50m_antarctic_ice_shelves_polys",
+      0
+    ));
+    var ice2 = process(SimpleFeature.create(
+      GeoUtils.worldToLatLonCoords(rectangle(0, Math.sqrt(1))),
+      Map.of(),
+      OpenMapTilesProfile.NATURAL_EARTH_SOURCE,
+      "ne_10m_antarctic_ice_shelves_polys",
+      0
+    ));
+    assertFeatures(0, List.of(Map.of(
+      "_layer", "landcover",
+      "subclass", "ice_shelf",
+      "class", "ice",
+      "_buffer", 4d
+    )), ice1);
+    assertFeatures(0, List.of(Map.of(
+      "_layer", "landcover",
+      "subclass", "ice_shelf",
+      "class", "ice",
+      "_buffer", 4d
+    )), ice2);
+    assertCoversZoomRange(2, 6, "landcover",
+      ice1,
+      ice2
+    );
+  }
+
+  @Test
   void testLakeNaturalEarthByIntersection() {
     final var polygon = rectangle(0, 0.1);
     // NE lakes:

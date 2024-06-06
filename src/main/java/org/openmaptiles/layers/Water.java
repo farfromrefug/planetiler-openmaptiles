@@ -118,6 +118,8 @@ public class Water implements
       case "ne_110m_ocean" -> new WaterInfo(0, 1, FieldValues.CLASS_OCEAN);
       case "ne_50m_ocean" -> new WaterInfo(2, 4, FieldValues.CLASS_OCEAN);
       case "ne_10m_ocean" -> new WaterInfo(5, 5, FieldValues.CLASS_OCEAN);
+      case "ne_50m_antarctic_ice_shelves_polys" -> new WaterInfo(2, 4, "ice_shelf");
+      case "ne_10m_antarctic_ice_shelves_polys" -> new WaterInfo(5, 6, "ice_shelf");
       default -> null;
     };
     if (info != null) {
