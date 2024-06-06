@@ -252,37 +252,36 @@ public class Place implements
 
   @Override
   public void process(Tables.OsmStatePoint element, FeatureCollector features) {
-    try {
+    // try {
       // want the containing (not nearest) state polygon since we pre-filter the states in the polygon index
       // use natural earth to filter out any spurious states, and to set the rank field
-      NaturalEarthRegion state = states.getOnlyContaining(element.source().worldGeometry().getCentroid());
-      if (state != null) {
-        var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
+      // NaturalEarthRegion state = states.getOnlyContaining(element.source().worldGeometry().getCentroid());
+      // if (state != null) {
+      //   var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
         
-        int rank = Math.clamp(state.rank, 1, 6);
-        int minzoom = rank == 1 ? 2 : Math.max(3, rank - 1);
-        features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-          .putAttrs(names)
-          .setAttr(Fields.CLASS, element.place())
-          .setAttr(Fields.RANK, rank)
-          // TODO: This starts including every "state" point at z2, even before many countries show up.
-          //       Instead we might want to set state min zooms based on rank from natural earth?
-          .setMinZoom(minzoom)
-          .setSortKey(rank);
-      }
-    } catch (GeometryException e) {
-      e.log(stats, "omt_place_state",
-        "Unable to get point for OSM state " + element.source().id());
-    }
+      //   int rank = Math.clamp(state.rank, 1, 6);
+      //   int minzoom = rank == 1 ? 2 : Math.max(3, rank - 1);
+      //   features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+      //     .putAttrs(names)
+      //     .setAttr(Fields.CLASS, element.place())
+      //     .setAttr(Fields.RANK, rank)
+      //     // TODO: This starts including every "state" point at z2, even before many countries show up.
+      //     //       Instead we might want to set state min zooms based on rank from natural earth?
+      //     .setMinZoom(minzoom)
+      //     .setSortKey(rank);
+      // }
+    // } catch (GeometryException e) {
+    //   e.log(stats, "omt_place_state",
+    //     "Unable to get point for OSM state " + element.source().id());
+    // }
   }
 
   @Override
   public void process(Tables.OsmIslandPolygon element, FeatureCollector features) {
     try {
       double area = element.source().area();
-      int rank = AREA_RANKS.ceilingEntry(area).getValue();
-      int minzoom = 3 + rank;
-
+      int rank = AREA_RANKS.ceilingEntry(area/ 100).getValue();
+      int minzoom = 2 + rank;
       features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
         .setAttr(Fields.CLASS, "island")
@@ -297,11 +296,19 @@ public class Place implements
 
   @Override
   public void process(Tables.OsmIslandPoint element, FeatureCollector features) {
-    features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-      .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-      .setAttr(Fields.CLASS, "island")
-      .setAttr(Fields.RANK, 7)
-      .setMinZoom(12);
+    try {
+      double area = element.source().area();
+      int rank = AREA_RANKS.ceilingEntry(area / 100).getValue();
+      int minzoom = 2 + rank;
+      features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+        .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+        .setAttr(Fields.CLASS, "island")
+        .setAttr(Fields.RANK, rank)
+        .setMinZoom(minzoom);
+    } catch (GeometryException e) {
+      e.log(stats, "omt_place_island_poly",
+        "Unable to get point for OSM island polygon " + element.source().id());
+    }
   }
 
   @Override
@@ -364,14 +371,19 @@ public class Place implements
   @Override
   public void process(Tables.OsmBoundaryPolygon element, FeatureCollector features) {
     try {
-      int rank = AREA_RANKS.ceilingEntry(element.source().area()).getValue();
-      int minzoom = rank <= 4 ? rank + 5 : 10;
+      Integer adminLevel = Parse.parseIntOrNull(element.source().getTag("admin_level"));
+      if (adminLevel == null) {
+        double area = element.source().area();
+        int rank = AREA_RANKS.ceilingEntry(area).getValue();
+        int minzoom = rank <= 4 ? rank + 5 : 10;
 
-      features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-        .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-        .setAttr(OpenMapTilesSchema.Boundary.Fields.CLASS, element.boundary())
-        .setAttr(Fields.RANK, rank)
-        .setMinZoom(minzoom);
+        features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+          .setAttr(OpenMapTilesSchema.Boundary.Fields.CLASS, element.boundary())
+          .setAttr(Fields.RANK, rank)
+          .setAttr(Fields.ADMIN_LEVEL, adminLevel)
+          .setMinZoom(minzoom);
+      }
     } catch (GeometryException e) {
       e.log(stats, "omt_boundary_poly",
         "Unable to get point for OSM boundary polygon " + element.source().id());

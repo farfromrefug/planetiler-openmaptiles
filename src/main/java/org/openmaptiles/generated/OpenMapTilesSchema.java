@@ -1727,6 +1727,7 @@ public class OpenMapTilesSchema {
        * have a Natural Earth <code>scalerank</code>.
        */
       public static final String RANK = "rank";
+      public static final String ADMIN_LEVEL = "admin_level";
     }
     /** Attribute values for map elements in the place layer. */
     final class FieldValues {

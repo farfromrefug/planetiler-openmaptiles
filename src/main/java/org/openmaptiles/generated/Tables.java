@@ -296,7 +296,7 @@ public class Tables {
 
     /** Imposm3 "mapping" to filter OSM elements that should appear in this "table". */
     public static final Expression MAPPING =
-      and(matchAny("boundary", "aboriginal_lands"), matchAny("type", "boundary"), matchType("polygon"));
+      and(matchAny("boundary", "aboriginal_lands", "administrative"), matchAny("type", "boundary"), matchType("polygon"));
 
     /**
      * Interface for layer implementations to extend to subscribe to OSM elements filtered and parsed as

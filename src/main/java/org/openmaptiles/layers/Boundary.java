@@ -40,6 +40,7 @@ import static com.onthegomap.planetiler.util.MemoryEstimator.POINTER_BYTES;
 import static com.onthegomap.planetiler.util.MemoryEstimator.estimateSize;
 import static java.util.stream.Collectors.counting;
 import static java.util.stream.Collectors.groupingBy;
+import static org.openmaptiles.util.Utils.nullIfString;
 
 import com.carrotsearch.hppc.LongObjectMap;
 import com.onthegomap.planetiler.FeatureCollector;
@@ -85,47 +86,44 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Defines the logic for generating map elements for country, state, and town
- * boundaries in the {@code boundary} layer
+ * Defines the logic for generating map elements for country, state, and town boundaries in the {@code boundary} layer
  * from source features.
  * <p>
  * This class is ported to Java from
- * <a href=
- * "https://github.com/openmaptiles/openmaptiles/tree/master/layers/boundary">OpenMapTiles
- * boundary sql
+ * <a href="https://github.com/openmaptiles/openmaptiles/tree/master/layers/boundary">OpenMapTiles boundary sql
  * files</a>.
  */
-public class Boundary implements
-  OpenMapTilesSchema.Boundary,
-  OpenMapTilesProfile.NaturalEarthProcessor,
-  OpenMapTilesProfile.OsmRelationPreprocessor,
-  OpenMapTilesProfile.OsmAllProcessor,
-  Tables.OsmBoundaryPolygon.Handler,
-  OpenMapTilesProfile.FeaturePostProcessor,
-  OpenMapTilesProfile.FinishHandler {
+public class Boundary
+  implements
+    OpenMapTilesSchema.Boundary,
+    OpenMapTilesProfile.NaturalEarthProcessor,
+    OpenMapTilesProfile.OsmRelationPreprocessor,
+    OpenMapTilesProfile.OsmAllProcessor,
+    Tables.OsmBoundaryPolygon.Handler,
+    OpenMapTilesProfile.FeaturePostProcessor,
+    OpenMapTilesProfile.FinishHandler {
 
   /*
-   * Uses natural earth at lower zoom levels and OpenStreetMap at higher zoom
-   * levels.
+   * Uses natural earth at lower zoom levels and OpenStreetMap at higher zoom levels.
    *
    * For OpenStreetMap data at higher zoom levels:
    * 1) Preprocess relations on the first pass to extract info for relations where
-   * type=boundary and boundary=administrative and store the admin_level for
-   * later.
+   *    type=boundary and boundary=administrative and store the admin_level for
+   *    later.
    * 2) When processing individual ways, take the minimum (most important) admin
-   * level of every relation they are a part of and use that as the admin level
-   * for the way.
-   * 3) If boundary_country_names argument is true and the way is part of a
-   * country
-   * (admin_level=2) boundary, then hold onto it for later
+   *    level of every relation they are a part of and use that as the admin level
+   *    for the way.
+   * 3) If boundary_country_names argument is true and the way is part of a country
+   *    (admin_level=2) boundary, then hold onto it for later
    * 4) When we finish processing the OSM source, build country polygons from the
-   * saved ways and use that to determine which country is on the left and right
-   * side of each way, then emit the way with ADM0_L and ADM0_R keys set.
+   *    saved ways and use that to determine which country is on the left and right
+   *    side of each way, then emit the way with ADM0_L and ADM0_R keys set.
    * 5) Before emitting boundary lines, merge linestrings with the same tags.
    */
 
   private static final Logger LOGGER = LoggerFactory.getLogger(Boundary.class);
-  private static final double COUNTRY_TEST_OFFSET = GeoUtils.metersToPixelAtEquator(0, 10) / 256d;
+  private static final double COUNTRY_TEST_OFFSET =
+    GeoUtils.metersToPixelAtEquator(0, 10) / 256d;
   private static final String COUNTRY_KE = "Kenya";
   private static final String COUNTRY_SS = "South Sudan";
   private final Stats stats;
@@ -139,34 +137,46 @@ public class Boundary implements
   private final PlanetilerConfig config;
   private final Translations translations;
 
-  public Boundary(Translations translations, PlanetilerConfig config, Stats stats) {
+  public Boundary(
+    Translations translations,
+    PlanetilerConfig config,
+    Stats stats
+  ) {
     this.config = config;
-    this.addCountryNames = config.arguments().getBoolean(
-        "boundary_country_names",
-        "boundary layer: add left/right codes of neighboring countries",
-        true);
-    this.onlyOsmBoundaries = config.arguments().getBoolean(
-      "boundary_osm_only",
-      "boundary layer: only use OSM, even at low zoom levels",
-      false
-    );
+    this.addCountryNames =
+      config
+        .arguments()
+        .getBoolean(
+          "boundary_country_names",
+          "boundary layer: add left/right codes of neighboring countries",
+          true
+        );
+    this.onlyOsmBoundaries =
+      config
+        .arguments()
+        .getBoolean(
+          "boundary_osm_only",
+          "boundary layer: only use OSM, even at low zoom levels",
+          false
+        );
     this.stats = stats;
     this.translations = translations;
   }
 
   private static boolean isDisputed(Map<String, Object> tags) {
-    return Parse.bool(tags.get("disputed")) ||
-        Parse.bool(tags.get("dispute")) ||
-        "dispute".equals(tags.get("border_status")) ||
-        tags.containsKey("disputed_by") ||
-        tags.containsKey("claimed_by");
+    return (
+      Parse.bool(tags.get("disputed")) ||
+      Parse.bool(tags.get("dispute")) ||
+      "dispute".equals(tags.get("border_status")) ||
+      tags.containsKey("disputed_by") ||
+      tags.containsKey("claimed_by")
+    );
   }
 
   private static String editName(String name) {
-    return name == null ? null
-        : name.replace(" at ", "")
-            .replaceAll("\\s+", "")
-            .replace("Extentof", "");
+    return name == null
+      ? null
+      : name.replace(" at ", "").replaceAll("\\s+", "").replace("Extentof", "");
   }
 
   @Override
@@ -177,60 +187,83 @@ public class Boundary implements
   }
 
   @Override
-  public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
+  public void processNaturalEarth(
+    String table,
+    SourceFeature feature,
+    FeatureCollector features
+  ) {
     if (onlyOsmBoundaries) {
       return;
     }
-    boolean disputed = feature.getString("featurecla", "").startsWith("Disputed");
+    boolean disputed = feature
+      .getString("featurecla", "")
+      .startsWith("Disputed");
     record BoundaryInfo(int adminLevel, int minzoom, int maxzoom) {}
-    BoundaryInfo info = switch (table) {
-      case "ne_110m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 0, 0);
-      case "ne_50m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 1, 3);
-      case "ne_10m_admin_0_boundary_lines_land" -> {
-        boolean isDisputedSouthSudanAndKenya = false;
-        if (disputed) {
-          String left = feature.getString("adm0_left");
-          String right = feature.getString("adm0_right");
-          if (COUNTRY_SS.equals(left)) {
-            isDisputedSouthSudanAndKenya = COUNTRY_KE.equals(right);
-          } else if (COUNTRY_KE.equals(left)) {
-            isDisputedSouthSudanAndKenya = COUNTRY_SS.equals(right);
+    BoundaryInfo info =
+      switch (table) {
+        case "ne_110m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 0, 0);
+        case "ne_50m_admin_0_boundary_lines_land" -> new BoundaryInfo(2, 1, 3);
+        case "ne_10m_admin_0_boundary_lines_land" -> {
+          boolean isDisputedSouthSudanAndKenya = false;
+          if (disputed) {
+            String left = feature.getString("adm0_left");
+            String right = feature.getString("adm0_right");
+            if (COUNTRY_SS.equals(left)) {
+              isDisputedSouthSudanAndKenya = COUNTRY_KE.equals(right);
+            } else if (COUNTRY_KE.equals(left)) {
+              isDisputedSouthSudanAndKenya = COUNTRY_SS.equals(right);
+            }
           }
+          yield isDisputedSouthSudanAndKenya
+            ? new BoundaryInfo(2, 1, 4)
+            : feature.hasTag("featurecla", "Lease limit")
+              ? null
+              : new BoundaryInfo(2, 4, 4);
         }
-        yield isDisputedSouthSudanAndKenya ? new BoundaryInfo(2, 1, 4) :
-          feature.hasTag("featurecla", "Lease limit") ? null :
-          new BoundaryInfo(2, 4, 4);
-      }
-      case "ne_10m_admin_1_states_provinces_lines" -> {
-        Double minZoom = Parse.parseDoubleOrNull(feature.getTag("min_zoom"));
-        yield minZoom != null && minZoom <= 7 ? new BoundaryInfo(4, 2, 4)
-            : minZoom != null && minZoom <= 7.7 ? new BoundaryInfo(4, 4, 4) : null;
-      }
-      default -> null;
-    };
-    if (info != null) {
-      features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-          .setZoomRange(info.minzoom, info.maxzoom)
-          .setMinPixelSizeAtAllZooms(0)
-          .setAttr(Fields.ADMIN_LEVEL, info.adminLevel)
-          // .setAttr(Fields.MARITIME, 0)
-          .setAttr(Fields.DISPUTED, disputed ? 1 : null);
+        case "ne_10m_admin_1_states_provinces_lines" -> {
+          Double minZoom = Parse.parseDoubleOrNull(feature.getTag("min_zoom"));
+          yield minZoom != null && minZoom <= 7
+            ? new BoundaryInfo(4, 1, 4)
+            : minZoom != null && minZoom <= 7.7
+              ? new BoundaryInfo(4, 4, 4)
+              : null;
+        }
+        default -> null;
+      };
+    if (info != null && info.adminLevel <= 2) {
+      features
+        .line(LAYER_NAME)
+        .setBufferPixels(BUFFER_SIZE)
+        .setZoomRange(info.minzoom, info.maxzoom)
+        .setMinPixelSizeAtAllZooms(0)
+        .setAttr(Fields.ADMIN_LEVEL, info.adminLevel)
+        // .setAttr(Fields.MARITIME, 0)
+        .setAttr(Fields.DISPUTED, disputed ? 1 : null);
     }
   }
 
   @Override
-  public List<OsmRelationInfo> preprocessOsmRelation(OsmElement.Relation relation) {
-    if (relation.hasTag("type", "boundary") &&
-        relation.hasTag("admin_level") &&
-        relation.hasTag("boundary", "administrative")) {
-      Integer adminLevelValue = Parse.parseRoundInt(relation.getTag("admin_level"));
-      String code = relation.getString("ISO3166-1:alpha3", relation.getString("ISO3166-2"));
-      if (adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 6) {
+  public List<OsmRelationInfo> preprocessOsmRelation(
+    OsmElement.Relation relation
+  ) {
+    if (
+      relation.hasTag("type", "boundary") &&
+      relation.hasTag("admin_level") &&
+      relation.hasTag("boundary", "administrative")
+    ) {
+      Integer adminLevelValue = Parse.parseRoundInt(
+        relation.getTag("admin_level")
+      );
+      String code = relation.getString("ISO3166-1:alpha3");
+      if (
+        adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 2
+      ) {
         boolean disputed = isDisputed(relation.tags());
         if (code != null) {
           regionNames.put(relation.id(), code);
         }
-        return List.of(new BoundaryRelation(
+        return List.of(
+          new BoundaryRelation(
             relation.id(),
             adminLevelValue,
             disputed,
@@ -238,14 +271,14 @@ public class Boundary implements
             relation.getString("ref"),
             relation.getString("wikipedia"),
             disputed ? relation.getString("claimed_by") : null,
-            code));
+            code
+          )
+        );
       }
     }
     return null;
   }
 
-  // private static final double SMALLEST_REGION_WORLD_AREA = Math.pow(4, -26); //
-  // 2^14 tiles, 2^12 pixels per tile
   @Override
   public void processAllOsm(SourceFeature feature, FeatureCollector features) {
     if (!feature.canBeLine()) {
@@ -269,24 +302,29 @@ public class Boundary implements
           disputedName = disputedName == null ? rel.name : disputedName;
           claimedBy = claimedBy == null ? rel.claimedBy : claimedBy;
         }
-        if ((minAdminLevel == 2 || minAdminLevel == 4 || minAdminLevel == 6)
-            && regionNames.containsKey(info.relation().id)) {
+        if (minAdminLevel == 2 && regionNames.containsKey(info.relation().id)) {
           regionIds.add(info.relation().id);
         }
       }
 
-      if (minAdminLevel <= 6) {
+      if (minAdminLevel <= 2) {
         boolean wayIsDisputed = isDisputed(feature.tags());
         disputed |= wayIsDisputed;
         if (wayIsDisputed) {
-          disputedName = disputedName == null ? feature.getString("name") : disputedName;
-          claimedBy = claimedBy == null ? feature.getString("claimed_by") : claimedBy;
+          disputedName =
+            disputedName == null ? feature.getString("name") : disputedName;
+          claimedBy =
+            claimedBy == null ? feature.getString("claimed_by") : claimedBy;
         }
-        boolean maritime = feature.getBoolean("maritime") ||
-            feature.hasTag("natural", "coastline") ||
-            feature.hasTag("boundary_type", "maritime");
-        int minzoom = (maritime && minAdminLevel == 2) ? 4
-            : minAdminLevel <= 4 ? 5 : minAdminLevel <= 6 ? 6 : minAdminLevel <= 8 ? 11 : 12;
+        boolean maritime =
+          feature.getBoolean("maritime") ||
+          feature.hasTag("natural", "coastline") ||
+          feature.hasTag("boundary_type", "maritime");
+        int minzoom = (maritime && minAdminLevel == 2)
+          ? 4
+          : minAdminLevel <= 4
+            ? 3
+            : minAdminLevel <= 6 ? 6 : minAdminLevel <= 8 ? 11 : 12;
         if (onlyOsmBoundaries && minAdminLevel <= 4) {
           minzoom = minAdminLevel == 2 ? (maritime ? 4 : 0) : 1;
         }
@@ -294,39 +332,30 @@ public class Boundary implements
           // save for later
           try {
             CountryBoundaryComponent component = new CountryBoundaryComponent(
-                feature.id(),
-                minAdminLevel,
-                disputed,
-                maritime,
-                minzoom,
-                feature.line(),
-                regionIds,
-                claimedBy,
-                disputedName);
+              feature.id(),
+              minAdminLevel,
+              disputed,
+              maritime,
+              minzoom,
+              feature.line(),
+              regionIds,
+              claimedBy,
+              disputedName
+            );
             // multiple threads may update this concurrently
             synchronized (this) {
-              // if (minAdminLevel <= 2) {
-              boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>())
-                    .add(component.line);
-              // }
+              boundariesToMerge
+                .computeIfAbsent(
+                  component.groupingKey(),
+                  key -> new ArrayList<>()
+                )
+                .add(component.line);
               for (var info : relationInfos) {
-                // if (minAdminLevel == 4 || minAdminLevel == 6) {
-                //   component = new CountryBoundaryComponent(
-                //       feature.id(),
-                //       minAdminLevel,
-                //       false,
-                //       maritime,
-                //       minzoom,
-                //       feature.line(),
-                //       regionIds,
-                //       null,
-                //       info.relation().name);
-                //   boundariesToMerge.computeIfAbsent(component.groupingKey(), key -> new ArrayList<>())
-                //       .add(component.line);
-                // }
                 var rel = info.relation();
-                if (rel.adminLevel <= 2 || rel.adminLevel == 4 || rel.adminLevel == 6) {
-                  regionGeometries.computeIfAbsent(rel.id, id -> new ArrayList<>()).add(component.line);
+                if (rel.adminLevel <= 2) {
+                  regionGeometries
+                    .computeIfAbsent(rel.id, id -> new ArrayList<>())
+                    .add(component.line);
                 }
               }
             }
@@ -334,99 +363,112 @@ public class Boundary implements
             LOGGER.warn("Cannot extract boundary line from " + feature);
           }
         } else {
-          features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-              .setAttr(Fields.ADMIN_LEVEL, minAdminLevel)
-              .setAttr(Fields.DISPUTED, disputed ? 1 : null)
-              .setAttr(Fields.MARITIME, maritime ? 1 : null)
-              .setMinPixelSizeAtAllZooms(0)
-              .setPixelToleranceFactor(2)
-              .setMinZoom(minzoom)
-              .setAttr(Fields.CLAIMED_BY, claimedBy)
-              .setAttr(Fields.DISPUTED_NAME, editName(disputedName));
+          features
+            .line(LAYER_NAME)
+            .setBufferPixels(BUFFER_SIZE)
+            .setAttr(Fields.ADMIN_LEVEL, minAdminLevel)
+            .setAttr(Fields.DISPUTED, disputed ? 1 : null)
+            .setAttr(Fields.MARITIME, maritime ? 1 : null)
+            .setMinPixelSizeAtAllZooms(0)
+            .setMinZoom(minzoom)
+            .setAttr(Fields.CLAIMED_BY, claimedBy)
+            .setAttr(Fields.DISPUTED_NAME, editName(disputedName));
         }
       }
     }
   }
 
   @Override
-  public void process(Tables.OsmBoundaryPolygon element, FeatureCollector features) {
-    features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-      .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-      .setAttr(OpenMapTilesSchema.Boundary.Fields.CLASS, element.boundary())
-      .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
-      .setMinZoom(4);
+  public void process(
+    Tables.OsmBoundaryPolygon element,
+    FeatureCollector features
+  ) {
+    Integer adminLevel = Parse.parseIntOrNull(
+      element.source().getTag("admin_level")
+    );
+    if (adminLevel == null || (adminLevel == 4 || adminLevel == 6)) {
+      int minzoom = adminLevel == null
+        ? 4
+        : adminLevel <= 4 ? 3 : adminLevel <= 6 ? 6 : 4;
+      features
+        .polygon(LAYER_NAME)
+        .setBufferPixels(BUFFER_SIZE)
+        .putAttrs(
+          OmtLanguageUtils.getNames(element.source().tags(), translations)
+        )
+        .setAttr(Fields.ADMIN_LEVEL, adminLevel)
+        .setAttr("ref", element.source().getTag("ref"))
+        .setAttr(
+          Fields.CLASS,
+          nullIfString(element.boundary(), "administrative")
+        )
+        .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
+        .setMinZoom(minzoom);
+    }
   }
 
   @Override
-  public void finish(String sourceName, FeatureCollector.Factory featureCollectors,
-      Consumer<FeatureCollector.Feature> emit) {
+  public void finish(
+    String sourceName,
+    FeatureCollector.Factory featureCollectors,
+    Consumer<FeatureCollector.Feature> emit
+  ) {
     if (OpenMapTilesProfile.OSM_SOURCE.equals(sourceName)) {
       var timer = stats.startStage("boundaries");
       LongObjectMap<PreparedGeometry> countryBoundaries = prepareRegionPolygons();
 
       for (var entry : boundariesToMerge.entrySet()) {
         CountryBoundaryComponent key = entry.getKey();
-        if (key.adminLevel <= 2) {
-          LineMerger merger = new LineMerger();
-          for (Geometry geom : entry.getValue()) {
-            merger.add(geom);
-          }
-          entry.getValue().clear();
-          for (Object merged : merger.getMergedLineStrings()) {
-            if (merged instanceof LineString lineString) {
-              BorderingRegions borderingRegions = getBorderingRegions(countryBoundaries, key.regions, lineString);
+        LineMerger merger = new LineMerger();
+        for (Geometry geom : entry.getValue()) {
+          merger.add(geom);
+        }
+        entry.getValue().clear();
+        for (Object merged : merger.getMergedLineStrings()) {
+          if (merged instanceof LineString lineString) {
+            BorderingRegions borderingRegions = getBorderingRegions(
+              countryBoundaries,
+              key.regions,
+              lineString
+            );
 
-              var features = featureCollectors.get(SimpleFeature.fromWorldGeometry(lineString, key.id));
-              var newFeature = features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-                .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
-                .setAttr(Fields.DISPUTED, key.disputed ? 1 : 0)
-                .setAttr(Fields.MARITIME, key.maritime ? 1 : 0)
-                .setAttr(Fields.CLAIMED_BY, key.claimedBy)
-                .setAttr(Fields.DISPUTED_NAME, key.disputed ? editName(key.name) : null)
-                .setMinPixelSizeAtAllZooms(0)
-                .setMinZoom(key.minzoom);
-              if (key.adminLevel == 2 && !key.disputed) {
-                // only non-disputed admin 2 boundaries get to have adm0_{l,r}, at zoom 5 and more
-                newFeature
-                  .setAttrWithMinzoom(Fields.ADM0_L,
-                    borderingRegions.left == null ? null : regionNames.get(borderingRegions.left), 5)
-                  .setAttrWithMinzoom(Fields.ADM0_R,
-                    borderingRegions.right == null ? null : regionNames.get(borderingRegions.right), 5);
-              }
-              for (var feature : features) {
-                emit.accept(feature);
-              }
+            var features = featureCollectors.get(
+              SimpleFeature.fromWorldGeometry(lineString, key.id)
+            );
+            var newFeature = features
+              .line(LAYER_NAME)
+              .setBufferPixels(BUFFER_SIZE)
+              .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
+              .setAttr(Fields.DISPUTED, key.disputed ? 1 : null)
+              .setAttr(Fields.MARITIME, key.maritime ? 1 : null)
+              .setAttr(Fields.CLAIMED_BY, key.claimedBy)
+              .setAttr(
+                Fields.DISPUTED_NAME,
+                key.disputed ? editName(key.name) : null
+              )
+              .setMinPixelSizeAtAllZooms(0)
+              .setMinZoom(key.minzoom);
+            if (key.adminLevel == 2 && !key.disputed) {
+              // only non-disputed admin 2 boundaries get to have adm0_{l,r}, at zoom 5 and more
+              newFeature
+                .setAttrWithMinzoom(
+                  Fields.ADM0_L,
+                  borderingRegions.left == null
+                    ? null
+                    : regionNames.get(borderingRegions.left),
+                  5
+                )
+                .setAttrWithMinzoom(
+                  Fields.ADM0_R,
+                  borderingRegions.right == null
+                    ? null
+                    : regionNames.get(borderingRegions.right),
+                  5
+                );
             }
-          // } else if (key.adminLevel == 4 || key.adminLevel == 6) {
-          // try {
-          // Set<Long> regions = key.regions;
-          // for (var regionId : regions) {
-          // // LOGGER.info("testing for relation " + relationInfos.size() + " " +
-          // relation.id + " " + relation.name);
-          // if (countryBoundaries.containsKey(regionId)) {
-          // PreparedGeometry geom = countryBoundaries.get(regionId);
-          // // var names = OmtLanguageUtils.getNames(key.feature.tags(), translations);
-          // LOGGER.info("testing for PreparedGeometry " + regionId + " " + key.name + " "
-          // + GeoUtils.worldToLatLonCoords(geom.getGeometry().getCentroid()));
-          // // LOGGER.info("features2 " + features2);
-          // featureCollectors.get(SimpleFeature.fromWorldGeometry(geom.getGeometry().getCentroid())).point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-          // // .putAttrs(names)
-          // .setAttr("name", key.name)
-          // .setAttr(Fields.ADMIN_LEVEL, key.adminLevel)
-          // // .setAttr("ref", key.ref)
-          // // .setAttr("wikipedia",relation.wikipedia)
-          // // .setPointLabelGridPixelSize(14, 100)
-          // // .setSortKey(SortKey
-          // // .orderByLog(area, 1d, SMALLEST_REGION_WORLD_AREA, 1 << (SORT_KEY_BITS - 2)
-          // - 1)
-          // // .get()
-          // // )
-          // .setMinZoom(key.minzoom);
-          // }
-          // }
-
-          // } catch (Exception e) {
-          // // e.printStackTrace();;
+            for (var feature : features) {
+              emit.accept(feature);
+            }
           }
         }
       }
@@ -435,20 +477,31 @@ public class Boundary implements
   }
 
   @Override
-  public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
-    double minLength = config.minFeatureSize(zoom);
+  public List<VectorTile.Feature> postProcess(
+    int zoom,
+    List<VectorTile.Feature> items
+  ) {
+    // only omit a segment if it is shorter than a pixel
+    double minLength = config.minFeatureSizeAtMaxZoom();
     double tolerance = config.tolerance(zoom);
-    return FeatureMerge.mergeLineStrings(items, attrs -> minLength, tolerance, BUFFER_SIZE);
+    return FeatureMerge.mergeLineStrings(
+      items,
+      attrs -> minLength,
+      tolerance,
+      BUFFER_SIZE
+    );
   }
 
   /** Returns the left and right country for {@code lineString}. */
   private BorderingRegions getBorderingRegions(
-      LongObjectMap<PreparedGeometry> countryBoundaries,
-      Set<Long> allRegions,
-      LineString lineString) {
-    Set<Long> validRegions = allRegions.stream()
-        .filter(countryBoundaries::containsKey)
-        .collect(Collectors.toSet());
+    LongObjectMap<PreparedGeometry> countryBoundaries,
+    Set<Long> allRegions,
+    LineString lineString
+  ) {
+    Set<Long> validRegions = allRegions
+      .stream()
+      .filter(countryBoundaries::containsKey)
+      .collect(Collectors.toSet());
     if (validRegions.isEmpty()) {
       return BorderingRegions.empty();
     }
@@ -457,8 +510,16 @@ public class Boundary implements
     int steps = 10;
     for (int i = 0; i < steps; i++) {
       double ratio = (double) (i + 1) / (steps + 2);
-      Point right = GeoUtils.pointAlongOffset(lineString, ratio, COUNTRY_TEST_OFFSET);
-      Point left = GeoUtils.pointAlongOffset(lineString, ratio, -COUNTRY_TEST_OFFSET);
+      Point right = GeoUtils.pointAlongOffset(
+        lineString,
+        ratio,
+        COUNTRY_TEST_OFFSET
+      );
+      Point left = GeoUtils.pointAlongOffset(
+        lineString,
+        ratio,
+        -COUNTRY_TEST_OFFSET
+      );
       for (Long regionId : validRegions) {
         PreparedGeometry geom = countryBoundaries.get(regionId);
         if (geom != null) {
@@ -478,22 +539,25 @@ public class Boundary implements
     var left = mode(lefts);
 
     if (left == null && right == null) {
-      Coordinate point = GeoUtils.worldToLatLonCoords(GeoUtils.pointAlongOffset(lineString, 0.5, 0)).getCoordinate();
-      LOGGER.warn("no left or right country for border between OSM country relations: %s around %s"
-          .formatted(
-              validRegions,
-              Format.osmDebugUrl(10, point)));
+      Coordinate point = GeoUtils
+        .worldToLatLonCoords(GeoUtils.pointAlongOffset(lineString, 0.5, 0))
+        .getCoordinate();
+      LOGGER.warn(
+        "no left or right country for border between OSM country relations: %s around %s".formatted(
+            validRegions,
+            Format.osmDebugUrl(10, point)
+          )
+      );
     }
 
     return new BorderingRegions(left, right);
   }
 
-  /**
-   * Returns a map from region ID to prepared geometry optimized for
-   * {@code contains} queries.
-   */
+  /** Returns a map from region ID to prepared geometry optimized for {@code contains} queries. */
   private LongObjectMap<PreparedGeometry> prepareRegionPolygons() {
-    LOGGER.info("Creating polygons for " + regionGeometries.size() + " boundaries");
+    LOGGER.info(
+      "Creating polygons for " + regionGeometries.size() + " boundaries"
+    );
     LongObjectMap<PreparedGeometry> countryBoundaries = Hppc.newLongObjectHashMap();
     for (var entry : regionGeometries.entrySet()) {
       Long regionId = entry.getKey();
@@ -502,63 +566,88 @@ public class Boundary implements
       try {
         Geometry combined = polygonizer.getGeometry().union();
         if (combined.isEmpty()) {
-          LOGGER.warn("Unable to form closed polygon for OSM relation " + regionId + " (likely missing edges)");
+          LOGGER.warn(
+            "Unable to form closed polygon for OSM relation " +
+            regionId +
+            " (likely missing edges)"
+          );
         } else {
-          LOGGER.info("Creating countryBoundaries for " + regionId);
-          countryBoundaries.put(regionId, PreparedGeometryFactory.prepare(combined));
+          countryBoundaries.put(
+            regionId,
+            PreparedGeometryFactory.prepare(combined)
+          );
         }
       } catch (TopologyException e) {
-        LOGGER
-            .warn("Unable to build boundary polygon for OSM relation " + regionId + ": " + e.getMessage());
+        LOGGER.warn(
+          "Unable to build boundary polygon for OSM relation " +
+          regionId +
+          ": " +
+          e.getMessage()
+        );
       }
     }
-    LOGGER.info("Finished creating " + countryBoundaries.size() + " country polygons");
+    LOGGER.info(
+      "Finished creating " + countryBoundaries.size() + " country polygons"
+    );
     return countryBoundaries;
   }
 
   /** Returns most frequently-occurring element in {@code list}. */
   private static Long mode(List<Long> list) {
-    return list.stream()
-        .collect(groupingBy(Function.identity(), counting())).entrySet().stream()
-        .max(Map.Entry.comparingByValue())
-        .map(Map.Entry::getKey)
-        .orElse(null);
+    return list
+      .stream()
+      .collect(groupingBy(Function.identity(), counting()))
+      .entrySet()
+      .stream()
+      .max(Map.Entry.comparingByValue())
+      .map(Map.Entry::getKey)
+      .orElse(null);
   }
 
   private record BorderingRegions(Long left, Long right) {
-
     public static BorderingRegions empty() {
       return new BorderingRegions(null, null);
     }
   }
 
   /**
-   * Minimal set of information extracted from a boundary relation to be used when
-   * processing each way in that relation.
+   * Minimal set of information extracted from a boundary relation to be used when processing each way in that relation.
    */
   private record BoundaryRelation(
-      long id,
-      int adminLevel,
-      boolean disputed,
-      String name,
-      // String names,
-      String ref,
-      String wikipedia,
-      String claimedBy,
-      String iso3166alpha3) implements OsmRelationInfo {
-
+    long id,
+    int adminLevel,
+    boolean disputed,
+    String name,
+    // String names,
+    String ref,
+    String wikipedia,
+    String claimedBy,
+    String iso3166alpha3
+  )
+    implements OsmRelationInfo {
     @Override
     public long estimateMemoryUsageBytes() {
-      return CLASS_HEADER_BYTES + MemoryEstimator.estimateSizeLong(id) + MemoryEstimator.estimateSizeInt(adminLevel) +
-          estimateSize(disputed) + POINTER_BYTES + estimateSize(name) + POINTER_BYTES + estimateSize(ref)
-          + POINTER_BYTES + estimateSize(wikipedia) + POINTER_BYTES + estimateSize(claimedBy) +
-          POINTER_BYTES + estimateSize(iso3166alpha3);
+      return (
+        CLASS_HEADER_BYTES +
+        MemoryEstimator.estimateSizeLong(id) +
+        MemoryEstimator.estimateSizeInt(adminLevel) +
+        estimateSize(disputed) +
+        POINTER_BYTES +
+        estimateSize(name) +
+        POINTER_BYTES +
+        estimateSize(ref) +
+        POINTER_BYTES +
+        estimateSize(wikipedia) +
+        POINTER_BYTES +
+        estimateSize(claimedBy) +
+        POINTER_BYTES +
+        estimateSize(iso3166alpha3)
+      );
     }
   }
 
   /**
-   * Information to hold onto from processing a way in a boundary relation to
-   * determine the left/right region ID later.
+   * Information to hold onto from processing a way in a boundary relation to determine the left/right region ID later.
    */
   private record CountryBoundaryComponent(
     long id,
@@ -571,9 +660,18 @@ public class Boundary implements
     String claimedBy,
     String name
   ) {
-
     CountryBoundaryComponent groupingKey() {
-      return new CountryBoundaryComponent(id, adminLevel, disputed, maritime, minzoom, null, regions, claimedBy, name);
+      return new CountryBoundaryComponent(
+        id,
+        adminLevel,
+        disputed,
+        maritime,
+        minzoom,
+        null,
+        regions,
+        claimedBy,
+        name
+      );
     }
   }
 }
