@@ -88,7 +88,7 @@ public class Place implements
   Tables.OsmIslandPoint.Handler,
   Tables.OsmIslandPolygon.Handler,
   Tables.OsmCityPoint.Handler,
-  Tables.OsmBoundaryPolygon.Handler,
+  // Tables.OsmBoundaryPolygon.Handler,
   OpenMapTilesProfile.FeaturePostProcessor {
 
   /*
@@ -368,27 +368,27 @@ public class Place implements
     }
   }
 
-  @Override
-  public void process(Tables.OsmBoundaryPolygon element, FeatureCollector features) {
-    try {
-      Integer adminLevel = Parse.parseIntOrNull(element.source().getTag("admin_level"));
-      if (adminLevel == null) {
-        double area = element.source().area();
-        int rank = AREA_RANKS.ceilingEntry(area).getValue();
-        int minzoom = rank <= 4 ? rank + 5 : 10;
+  // @Override
+  // public void process(Tables.OsmBoundaryPolygon element, FeatureCollector features) {
+  //   try {
+  //     Integer adminLevel = Parse.parseIntOrNull(element.source().getTag("admin_level"));
+  //     if (adminLevel == null) {
+  //       double area = element.source().area();
+  //       int rank = AREA_RANKS.ceilingEntry(area).getValue();
+  //       int minzoom = rank <= 4 ? rank + 5 : 10;
 
-        features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-          .setAttr(OpenMapTilesSchema.Boundary.Fields.CLASS, element.boundary())
-          .setAttr(Fields.RANK, rank)
-          .setAttr(Fields.ADMIN_LEVEL, adminLevel)
-          .setMinZoom(minzoom);
-      }
-    } catch (GeometryException e) {
-      e.log(stats, "omt_boundary_poly",
-        "Unable to get point for OSM boundary polygon " + element.source().id());
-    }
-  }
+  //       features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+  //         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+  //         .setAttr(OpenMapTilesSchema.Boundary.Fields.CLASS, element.boundary())
+  //         .setAttr(Fields.RANK, rank)
+  //         .setAttr(Fields.ADMIN_LEVEL, adminLevel)
+  //         .setMinZoom(minzoom);
+  //     }
+  //   } catch (GeometryException e) {
+  //     e.log(stats, "omt_boundary_poly",
+  //       "Unable to get point for OSM boundary polygon " + element.source().id());
+  //   }
+  // }
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {

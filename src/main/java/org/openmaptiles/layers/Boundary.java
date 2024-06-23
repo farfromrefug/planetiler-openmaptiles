@@ -378,6 +378,19 @@ public class Boundary
     }
   }
 
+  public String stringToColour(String str) {
+    int hash = 0;
+    for (char c : str.toCharArray()) {
+      hash = (int)c + ((hash << 5) - hash);
+    }
+    StringBuilder colour = new StringBuilder("#");
+    for (int i = 0; i < 3; i++) {
+        int value = Math.round(128 + ((hash >> (i * 8)) & 0xFF) / 2);
+        colour.append(String.format("%02x", value));
+    }
+    return colour.toString();
+}
+
   @Override
   public void process(
     Tables.OsmBoundaryPolygon element,
@@ -390,20 +403,35 @@ public class Boundary
       int minzoom = adminLevel == null
         ? 4
         : adminLevel <= 4 ? 3 : adminLevel <= 6 ? 6 : 4;
-      features
+        var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
+        features
         .polygon(LAYER_NAME)
         .setBufferPixels(BUFFER_SIZE)
-        .putAttrs(
-          OmtLanguageUtils.getNames(element.source().tags(), translations)
-        )
+        .putAttrs(names)
         .setAttr(Fields.ADMIN_LEVEL, adminLevel)
         .setAttr("ref", element.source().getTag("ref"))
+        .setAttr("color", stringToColour((String)element.source().getTag("name")))
         .setAttr(
           Fields.CLASS,
           nullIfString(element.boundary(), "administrative")
         )
         .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
         .setMinZoom(minzoom);
+      
+      if (element.name() != null) {
+          features.pointOnSurface(LAYER_NAME).setBufferPixels(256)
+            .setAttr(
+              Fields.CLASS,
+              nullIfString(element.boundary(), "administrative")
+            )
+            // .setAttr(Fields.SUBCLASS, nullIfEmpty(protectionTitle))
+            .putAttrs(names)
+            .setAttr(Fields.ADMIN_LEVEL, adminLevel)
+            .setAttr("ref", element.source().getTag("ref"))
+            .setAttr("color", stringToColour((String)element.source().getTag("name")))
+            .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
+            .setMinZoom(minzoom);
+        }
     }
   }
 
