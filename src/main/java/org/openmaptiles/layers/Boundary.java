@@ -256,7 +256,7 @@ public class Boundary
       );
       String code = relation.getString("ISO3166-1:alpha3");
       if (
-        adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 2
+        adminLevelValue != null && adminLevelValue >= 2 && adminLevelValue <= 6
       ) {
         boolean disputed = isDisputed(relation.tags());
         if (code != null) {
@@ -302,12 +302,13 @@ public class Boundary
           disputedName = disputedName == null ? rel.name : disputedName;
           claimedBy = claimedBy == null ? rel.claimedBy : claimedBy;
         }
-        if (minAdminLevel == 2 && regionNames.containsKey(info.relation().id)) {
+        if ((minAdminLevel == 2 || minAdminLevel == 4 || minAdminLevel == 6)
+            && regionNames.containsKey(info.relation().id)) {
           regionIds.add(info.relation().id);
         }
       }
 
-      if (minAdminLevel <= 2) {
+      if (minAdminLevel <= 2 || minAdminLevel == 4 || minAdminLevel == 6) {
         boolean wayIsDisputed = isDisputed(feature.tags());
         disputed |= wayIsDisputed;
         if (wayIsDisputed) {
@@ -322,9 +323,7 @@ public class Boundary
           feature.hasTag("boundary_type", "maritime");
         int minzoom = (maritime && minAdminLevel == 2)
           ? 4
-          : minAdminLevel <= 4
-            ? 3
-            : minAdminLevel <= 6 ? 6 : minAdminLevel <= 8 ? 11 : 12;
+          : 12;
         if (onlyOsmBoundaries && minAdminLevel <= 4) {
           minzoom = minAdminLevel == 2 ? (maritime ? 4 : 0) : 1;
         }
@@ -399,7 +398,7 @@ public class Boundary
     Integer adminLevel = Parse.parseIntOrNull(
       element.source().getTag("admin_level")
     );
-    if (adminLevel == null || (adminLevel == 4 || adminLevel == 6)) {
+    if (/* adminLevel == null ||  */(adminLevel == 4 || adminLevel == 6)) {
       int minzoom = adminLevel == null
         ? 4
         : adminLevel <= 4 ? 3 : adminLevel <= 6 ? 6 : 4;
@@ -416,10 +415,10 @@ public class Boundary
           nullIfString(element.boundary(), "administrative")
         )
         .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
-        .setMinZoom(minzoom);
+        .setMinZoom(minzoom).setMaxZoom(11);
       
       if (element.name() != null) {
-          features.pointOnSurface(LAYER_NAME).setBufferPixels(256)
+          features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
             .setAttr(
               Fields.CLASS,
               nullIfString(element.boundary(), "administrative")
@@ -430,7 +429,7 @@ public class Boundary
             .setAttr("ref", element.source().getTag("ref"))
             .setAttr("color", stringToColour((String)element.source().getTag("name")))
             .setMinPixelSizeBelowZoom(13, 4) // for Z4: `sql_filter: area>power(ZRES3,2)`, etc.
-            .setMinZoom(minzoom);
+            .setMinZoom(minzoom).setMaxZoom(11);
         }
     }
   }
