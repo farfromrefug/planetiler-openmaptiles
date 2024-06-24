@@ -82,10 +82,10 @@ public class Landcover implements
   private static final double LOG2 = Math.log(2);
 
   public static final ZoomFunction<Number> MIN_PIXEL_SIZE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
-    13, 8,
-    11, 6,
-    10, 4,
-    9, 0.1
+    // 13, 8,
+    12, 6,
+    11, 5,
+    10, 4
   ));
   public static final ZoomFunction<Number> PIXEL_TOLERANCE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
     10, 0.7,
@@ -160,11 +160,13 @@ public class Landcover implements
           // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
           // .setPixelToleranceOverrides(PIXEL_TOLERANCE_THRESHOLDS)
           // .setPixelTolerance(tolerance)
-          .setSimplifyUsingVW(true)
+          // .setSimplifyUsingVW(true)
 
-          .setPixelToleranceFactor(2.5)
           // default is 0.1, this helps reduce size of some heavy z7-10 tiles
           .setPixelToleranceBelowZoom(10, 0.25)
+
+          // 
+          .setPixelToleranceFactor(2.5)
           .setMinPixelSizeFactor(1.8)
           .setAttr(Fields.CLASS, clazz)
           .setAttr(Fields.SUBCLASS, subclazz)
