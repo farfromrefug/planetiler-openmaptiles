@@ -1653,7 +1653,7 @@ public class OpenMapTilesSchema {
    * <a href="https://github.com/openmaptiles/openmaptiles/blob/v3.15/layers/place/place.yaml">place.yaml</a>
    */
   public interface Place extends Layer {
-    double BUFFER_SIZE = 256.0;
+    double BUFFER_SIZE = 4.0;
     String LAYER_NAME = "place";
 
     @Override
@@ -1765,7 +1765,7 @@ public class OpenMapTilesSchema {
    * "https://github.com/openmaptiles/openmaptiles/blob/v3.15/layers/housenumber/housenumber.yaml">housenumber.yaml</a>
    */
   public interface Housenumber extends Layer {
-    double BUFFER_SIZE = 8.0;
+    double BUFFER_SIZE = 4.0;
     String LAYER_NAME = "housenumber";
 
     @Override
@@ -1797,7 +1797,7 @@ public class OpenMapTilesSchema {
    * Generated from <a href="https://github.com/openmaptiles/openmaptiles/blob/v3.15/layers/poi/poi.yaml">poi.yaml</a>
    */
   public interface Poi extends Layer {
-    double BUFFER_SIZE = 64.0;
+    double BUFFER_SIZE = 4.0;
     String LAYER_NAME = "poi";
 
     @Override
@@ -2032,7 +2032,7 @@ public class OpenMapTilesSchema {
    * "https://github.com/openmaptiles/openmaptiles/blob/v3.15/layers/aerodrome_label/aerodrome_label.yaml">aerodrome_label.yaml</a>
    */
   public interface AerodromeLabel extends Layer {
-    double BUFFER_SIZE = 64.0;
+    double BUFFER_SIZE = 4.0;
     String LAYER_NAME = "aerodrome_label";
 
     @Override
