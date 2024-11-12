@@ -626,9 +626,9 @@ public class Transportation implements
       if (service != null) {
         minzoom = 14;
       } else if (FieldValues.SUBCLASS_RAIL.equals(railway)) {
-        minzoom = "main".equals(element.usage()) ? 8 : 10;
+        minzoom = "main".equals(element.usage()) ? 6 : 8;
       } else if (FieldValues.SUBCLASS_NARROW_GAUGE.equals(railway)) {
-        minzoom = 10;
+        minzoom = 9;
       } else if (FieldValues.SUBCLASS_LIGHT_RAIL.equals(railway)) {
         minzoom = 11;
       } else {
