@@ -321,7 +321,7 @@ public class Boundary
           feature.getBoolean("maritime") ||
           feature.hasTag("natural", "coastline") ||
           feature.hasTag("boundary_type", "maritime");
-        int minzoom = (maritime && minAdminLevel == 2)
+        int minzoom = (minAdminLevel == 2)
           ? 4
           : 12;
         if (onlyOsmBoundaries && minAdminLevel <= 4) {
@@ -398,10 +398,10 @@ public class Boundary
     Integer adminLevel = Parse.parseIntOrNull(
       element.source().getTag("admin_level")
     );
-    if (/* adminLevel == null ||  */(adminLevel == 4 || adminLevel == 6)) {
+    if (adminLevel != null &&  ((adminLevel == 2 || adminLevel == 4 || adminLevel == 6)) {
       int minzoom = adminLevel == null
         ? 4
-        : adminLevel <= 4 ? 3 : adminLevel <= 6 ? 6 : 4;
+        : adminLevel <= 2 ? 1 : adminLevel <= 4 ? 3 : adminLevel <= 6 ? 6 : 4;
         var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
         features
         .polygon(LAYER_NAME)
