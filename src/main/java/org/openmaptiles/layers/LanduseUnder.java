@@ -66,25 +66,43 @@ import org.openmaptiles.generated.Tables;
  * This class is ported to Java from
  * <a href="https://github.com/openmaptiles/openmaptiles/tree/master/layers/landuse">OpenMapTiles landuse sql files</a>.
  */
-public class Landuse implements
-  OpenMapTilesSchema.Landuse,
+public class LanduseUnder implements
+  OpenMapTilesSchema.LanduseUnder,
+  OpenMapTilesProfile.NaturalEarthProcessor,
   OpenMapTilesProfile.FeaturePostProcessor,
-  Tables.OsmLandusePolygon.Handler {
+  Tables.OsmLanduseUnderPolygon.Handler {
 
   private static final ZoomFunction<Number> MIN_PIXEL_SIZE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
     13, 4,
     7, 2,
     6, 1
   ));
+  private static final Set<String> Z6_CLASSES = Set.of(
+    FieldValues.CLASS_RESIDENTIAL,
+    FieldValues.CLASS_SUBURB,
+    FieldValues.CLASS_QUARTER,
+    FieldValues.CLASS_NEIGHBOURHOOD
+  );
 
   private final PlanetilerConfig config;
   
-  public Landuse(Translations translations, PlanetilerConfig config, Stats stats) {
+  public LanduseUnder(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
   }
 
+  @Override
+  public void processNaturalEarth(String table, SourceFeature feature, FeatureCollector features) {
+    if ("ne_50m_urban_areas".equals(table)) {
+      Double scalerank = Parse.parseDoubleOrNull(feature.getTag("scalerank"));
+      if (scalerank != null && scalerank <= 2) {
+        features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+          .setAttr(Fields.CLASS, FieldValues.CLASS_RESIDENTIAL)
+          .setZoomRange(4, 5);
+      }
+    }
+  }
 
-  public static String getClass(Tables.OsmLandusePolygon element) {
+  public static String getClass(Tables.OsmLanduseUnderPolygon element) {
     String clazz = coalesce(
       nullIfEmpty(element.landuse()),
       nullIfEmpty(element.amenity()),
@@ -94,11 +112,16 @@ public class Landuse implements
       nullIfEmpty(element.waterway()),
       nullIfEmpty(element.highway())
     );
+    if (clazz != null) {
+      if ("grave_yard".equals(clazz)) {
+        clazz = FieldValues.CLASS_CEMETERY;
+      }
+    }
     return clazz;
   }
 
   @Override
-  public void process(Tables.OsmLandusePolygon element, FeatureCollector features) {
+  public void process(Tables.OsmLanduseUnderPolygon element, FeatureCollector features) {
     String clazz = getClass(element);
     if (clazz != null) {
       var feature = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
@@ -106,16 +129,16 @@ public class Landuse implements
         .setSimplifyUsingVW(true)
         // .setPixelToleranceFactor(2.2)
         // .setMinPixelSizeFactor(2.5)
-        .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
-        .setMinZoom(9);
-        // if (FieldValues.CLASS_RESIDENTIAL.equals(clazz)) {
-        //   feature
-        //     .setMinPixelSize(0.1)
-        //     .setPixelTolerance(0.25);
-        // } else {
-          // feature
-            // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS);
-        // }
+        // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
+        .setMinZoom(Z6_CLASSES.contains(clazz) ? 6 : 9);
+        if (FieldValues.CLASS_RESIDENTIAL.equals(clazz)) {
+          feature
+            .setMinPixelSize(0.1)
+            .setPixelTolerance(0.25);
+        } else {
+          feature
+            .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS);
+        }
     }
   }
 

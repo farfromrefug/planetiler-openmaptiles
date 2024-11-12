@@ -74,6 +74,7 @@ public class OpenMapTilesSchema {
       new org.openmaptiles.layers.Landcover(translations, config, stats),
       new org.openmaptiles.layers.LandcoverName(translations, config, stats),
       new org.openmaptiles.layers.Landuse(translations, config, stats),
+      new org.openmaptiles.layers.LanduseUnder(translations, config, stats),
       new org.openmaptiles.layers.LanduseName(translations, config, stats),
       new org.openmaptiles.layers.MountainPeak(translations, config, stats),
       new org.openmaptiles.layers.Park(translations, config, stats),
@@ -443,6 +444,95 @@ public class OpenMapTilesSchema {
     }
   }
   /**
+   * Landuse is used to describe use of land by humans. LanduseUnder is used for landuse needing to be drawn under landcover(like grass). At lower zoom levels this is from Natural Earth data for
+   * residential (urban) areas and at higher zoom levels mostly OSM <code>landuse</code> tags.
+   *
+   * Generated from
+   * <a href="https://github.com/openmaptiles/openmaptiles/blob/v3.15/layers/landuse/landuse.yaml">landuse.yaml</a>
+   */
+  public interface LanduseUnder extends Layer {
+    double BUFFER_SIZE = 4.0;
+    String LAYER_NAME = "landuse_under";
+
+    @Override
+    default String name() {
+      return LAYER_NAME;
+    }
+
+    /** Attribute names for map elements in the landuse_under layer. */
+    final class Fields {
+      /**
+       * Use the <strong>class</strong> to assign special colors to areas. Original value of either the
+       * <a href="http://wiki.openstreetmap.org/wiki/Key:landuse"><code>landuse</code></a>,
+       * <a href="http://wiki.openstreetmap.org/wiki/Key:amenity"><code>amenity</code></a>,
+       * <a href="http://wiki.openstreetmap.org/wiki/Key:leisure"><code>leisure</code></a>,
+       * <a href="http://wiki.openstreetmap.org/wiki/Key:tourism"><code>tourism</code></a>,
+       * <a href="http://wiki.openstreetmap.org/wiki/Key:place"><code>place</code></a> or
+       * <a href="http://wiki.openstreetmap.org/wiki/Key:waterway"><code>waterway</code></a> tag.
+       * <p>
+       * allowed values:
+       * <ul>
+       * <li>"railway"
+       * <li>"cemetery"
+       * <li>"military"
+       * <li>"residential"
+       * <li>"commercial"
+       * <li>"industrial"
+       * <li>"garages"
+       * <li>"retail"
+       * <li>"bus_station"
+       * <li>"school"
+       * <li>"university"
+       * <li>"kindergarten"
+       * <li>"college"
+       * <li>"library"
+       * <li>"hospital"
+       * <li>"stadium"
+       * <li>"pitch"
+       * <li>"playground"
+       * <li>"track"
+       * <li>"theme_park"
+       * <li>"zoo"
+       * <li>"suburb"
+       * <li>"quarter"
+       * <li>"neighbourhood"
+       * <li>"dam"
+       * </ul>
+       */
+      public static final String CLASS = "class";
+    }
+    /** Attribute values for map elements in the landuse_under layer. */
+    final class FieldValues {
+      public static final String CLASS_RAILWAY = "railway";
+      public static final String CLASS_CEMETERY = "cemetery";
+      public static final String CLASS_MILITARY = "military";
+      public static final String CLASS_RESIDENTIAL = "residential";
+      public static final String CLASS_COMMERCIAL = "commercial";
+      public static final String CLASS_INDUSTRIAL = "industrial";
+      public static final String CLASS_RETAIL = "retail";
+      public static final String CLASS_SCHOOL = "school";
+      public static final String CLASS_UNIVERSITY = "university";
+      public static final String CLASS_KINDERGARTEN = "kindergarten";
+      public static final String CLASS_COLLEGE = "college";
+      public static final String CLASS_LIBRARY = "library";
+      public static final String CLASS_HOSPITAL = "hospital";
+      public static final String CLASS_PLAYGROUND = "playground";
+      public static final String CLASS_THEME_PARK = "theme_park";
+      public static final String CLASS_ZOO = "zoo";
+      public static final String CLASS_SUBURB = "suburb";
+      public static final String CLASS_QUARTER = "quarter";
+      public static final String CLASS_NEIGHBOURHOOD = "neighbourhood";
+      public static final Set<String> CLASS_VALUES =
+        Set.of("railway", "cemetery", "military", "residential", "commercial", "industrial", "retail",
+          "school", "university", "kindergarten", "college", "library", "hospital",
+          "playground", "theme_park", "zoo", "suburb", "quarter", "neighbourhood");
+    }
+    /** Complex mappings to generate attribute values from OSM element tags in the landuse_under layer. */
+    final class FieldMappings {
+
+    }
+  }
+  /**
    * Landuse is used to describe use of land by humans. At lower zoom levels this is from Natural Earth data for
    * residential (urban) areas and at higher zoom levels mostly OSM <code>landuse</code> tags.
    *
@@ -502,35 +592,17 @@ public class OpenMapTilesSchema {
     }
     /** Attribute values for map elements in the landuse layer. */
     final class FieldValues {
-      public static final String CLASS_RAILWAY = "railway";
-      public static final String CLASS_CEMETERY = "cemetery";
-      public static final String CLASS_MILITARY = "military";
-      public static final String CLASS_RESIDENTIAL = "residential";
-      public static final String CLASS_COMMERCIAL = "commercial";
-      public static final String CLASS_INDUSTRIAL = "industrial";
+      
       public static final String CLASS_GARAGES = "garages";
-      public static final String CLASS_RETAIL = "retail";
       public static final String CLASS_BUS_STATION = "bus_station";
-      public static final String CLASS_SCHOOL = "school";
-      public static final String CLASS_UNIVERSITY = "university";
-      public static final String CLASS_KINDERGARTEN = "kindergarten";
-      public static final String CLASS_COLLEGE = "college";
-      public static final String CLASS_LIBRARY = "library";
-      public static final String CLASS_HOSPITAL = "hospital";
       public static final String CLASS_STADIUM = "stadium";
       public static final String CLASS_PITCH = "pitch";
-      public static final String CLASS_PLAYGROUND = "playground";
       public static final String CLASS_TRACK = "track";
-      public static final String CLASS_THEME_PARK = "theme_park";
-      public static final String CLASS_ZOO = "zoo";
-      public static final String CLASS_SUBURB = "suburb";
-      public static final String CLASS_QUARTER = "quarter";
-      public static final String CLASS_NEIGHBOURHOOD = "neighbourhood";
       public static final String CLASS_DAM = "dam";
       public static final Set<String> CLASS_VALUES =
-        Set.of("railway", "cemetery", "military", "residential", "commercial", "industrial", "garages", "retail",
-          "bus_station", "school", "university", "kindergarten", "college", "library", "hospital", "stadium", "pitch",
-          "playground", "track", "theme_park", "zoo", "suburb", "quarter", "neighbourhood", "dam");
+        Set.of("garages",
+          "bus_station", "stadium", "pitch",
+          "track", "dam");
     }
     /** Complex mappings to generate attribute values from OSM element tags in the landuse layer. */
     final class FieldMappings {

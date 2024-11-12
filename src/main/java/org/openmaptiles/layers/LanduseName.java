@@ -50,7 +50,8 @@ import com.onthegomap.planetiler.util.ZoomFunction;
 
 public class LanduseName implements
   OpenMapTilesSchema.LanduseName,
-  Tables.OsmLandusePolygon.Handler {
+  Tables.OsmLandusePolygon.Handler,
+  Tables.OsmLanduseUnderPolygon.Handler {
 
   /*
    * Generate building names from OSM data. 
@@ -80,6 +81,40 @@ public class LanduseName implements
   public void process(Tables.OsmLandusePolygon element, FeatureCollector features) {
     try {
       String clazz = Landuse.getClass(element);
+      if (clazz != null &&
+        (clazz.equals("quarry") ||
+          clazz.equals("military") ||
+          clazz.equals("railway") ||
+          clazz.equals("commercial") ||
+          clazz.equals("industrial") ||
+          clazz.equals("retail") ||
+          clazz.equals("track") ||
+          clazz.equals("playground") ||
+          clazz.equals("dam")) &&
+        element.source().hasTag("name")) {
+
+        var names = OmtLanguageUtils.getNames(element.source().tags(), translations);
+        Double area = element.source().area();
+
+        features.pointOnSurface(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+          .setAttr(Fields.CLASS, clazz)
+          .setAttr("way_pixels",
+            area != null ?
+              (ZoomFunction<Long>) zoom -> nullIfLong(Math.round(area * Math.pow(256 * Math.pow(2, zoom - 1), 2)), 0) :
+              null)
+          .putAttrs(names)
+          .setMinZoom(getMinZoomForArea(area));
+      }
+    } catch (GeometryException e) {
+      e.log(stats, "omt_landuse_poly",
+        "Unable to get area for OSM landuse polygon " + element.source().id());
+    }
+  }
+
+  @Override
+  public void process(Tables.OsmLanduseUnderPolygon element, FeatureCollector features) {
+    try {
+      String clazz = LanduseUnder.getClass(element);
       if (clazz != null &&
         (clazz.equals("quarry") ||
           clazz.equals("military") ||
