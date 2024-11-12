@@ -248,7 +248,7 @@ public class WaterName implements
         setupOsmWaterPolygonFeature(element, features.pointOnSurface(LAYER_NAME), clazz, minzoom)
           .setMaxZoom(maxzoom)
           // Show a label if a water feature covers at least 1/4 of a tile or z14+
-          .setMinPixelSizeBelowZoom(13, 128);
+          .setMinPixelSizeBelowZoom(13, 8);
       }
     }
   }
