@@ -137,29 +137,29 @@ public class Housenumber implements
     features.centroidIfConvex(LAYER_NAME)
       .setBufferPixels(BUFFER_SIZE)
       .setAttr(Fields.HOUSENUMBER, housenumber)
-      .setAttr(TEMP_PARTITION, partition)
-      .setAttr(TEMP_HAS_NAME, hasName)
+      // .setAttr(TEMP_PARTITION, partition)
+      // .setAttr(TEMP_HAS_NAME, hasName)
       .setMinZoom(14);
   }
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> list) throws GeometryException {
     // remove duplicate house numbers, features without name tag are prioritized
-    var items = list.stream()
-      .collect(Collectors.groupingBy(f -> f.attrs().get(TEMP_PARTITION)))
-      .values().stream()
-      .flatMap(
-        g -> g.stream().min(BY_TEMP_HAS_NAME).stream()
-      )
-      .toList();
+    // var items = list.stream()
+    //   .collect(Collectors.groupingBy(f -> f.attrs().get(TEMP_PARTITION)))
+    //   .values().stream()
+    //   .flatMap(
+    //     g -> g.stream().min(BY_TEMP_HAS_NAME).stream()
+    //   )
+    //   .toList();
 
-    // remove temporary attributes
-    for (var item : items) {
-      item.attrs().remove(TEMP_HAS_NAME);
-      item.attrs().remove(TEMP_PARTITION);
-    }
+    // // remove temporary attributes
+    // for (var item : items) {
+    //   item.attrs().remove(TEMP_HAS_NAME);
+    //   item.attrs().remove(TEMP_PARTITION);
+    // }
 
     // reduces the size of some heavy z14 tiles with many repeated housenumber values by 60% or more
-    return FeatureMerge.mergeMultiPoint(items);
+    return FeatureMerge.mergeMultiPoint(list);
   }
 }
