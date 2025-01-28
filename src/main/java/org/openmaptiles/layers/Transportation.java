@@ -43,6 +43,7 @@ import static java.util.Map.entry;
 
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -96,8 +97,8 @@ public class Transportation implements
   Tables.OsmSkiLinestring.Handler,
   Tables.OsmHighwayPolygon.Handler,
   OpenMapTilesProfile.NaturalEarthProcessor,
-  OpenMapTilesProfile.FeaturePostProcessor,
-  OpenMapTilesProfile.OsmRelationPreprocessor,
+  ForwardingProfile.LayerPostProcessor,
+  ForwardingProfile.OsmRelationPreprocessor,
   OpenMapTilesProfile.IgnoreWikidata {
 
   /*
@@ -723,16 +724,16 @@ public class Transportation implements
     // TODO merge preserving oneway instead ignoring
     int onewayId = 1;
     for (var item : items) {
-      var oneway = item.attrs().get(Fields.ONEWAY);
+      var oneway = item.tags().get(Fields.ONEWAY);
       if (oneway instanceof Number n && ONEWAY_VALUES.contains(n.intValue())) {
-        item.attrs().put(LIMIT_MERGE_TAG, onewayId++);
+        item.tags().put(LIMIT_MERGE_TAG, onewayId++);
       }
     }
 
     var merged = FeatureMerge.mergeLineStrings(items, minLength, tolerance, BUFFER_SIZE);
 
     for (var item : merged) {
-      item.attrs().remove(LIMIT_MERGE_TAG);
+      item.tags().remove(LIMIT_MERGE_TAG);
     }
     return merged;
   }

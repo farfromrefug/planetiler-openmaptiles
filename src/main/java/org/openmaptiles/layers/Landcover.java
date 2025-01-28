@@ -37,6 +37,7 @@ package org.openmaptiles.layers;
 
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -67,7 +68,7 @@ public class Landcover implements
   OpenMapTilesProfile.NaturalEarthProcessor,
   Tables.OsmLandcoverPolygon.Handler,
   Tables.OsmLandcoverLinestring.Handler,
-  OpenMapTilesProfile.FeaturePostProcessor {
+  ForwardingProfile.LayerPostProcessor {
 
   /*
    * Large ice areas come from natural earth and the rest come from OpenStreetMap at higher zoom
@@ -196,7 +197,7 @@ public class Landcover implements
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) throws GeometryException {
     if (zoom < 7 || zoom > 13) {
       for (var item : items) {
-        item.attrs().remove(TEMP_NUM_POINTS_ATTR);
+        item.tags().remove(TEMP_NUM_POINTS_ATTR);
       }
       return items;
     } else { // z7-13
@@ -235,7 +236,7 @@ public class Landcover implements
       
       var merged = FeatureMerge.mergeOverlappingPolygons(toMerge, 2);
       for (var item : merged) {
-        item.attrs().remove(tempGroupKey);
+        item.tags().remove(tempGroupKey);
       }
       result.addAll(merged);
       return result;

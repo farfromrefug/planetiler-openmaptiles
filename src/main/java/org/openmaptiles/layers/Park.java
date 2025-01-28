@@ -43,6 +43,7 @@ import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -59,6 +60,10 @@ import com.onthegomap.planetiler.util.SortKey;
 import com.onthegomap.planetiler.util.Translations;
 import com.onthegomap.planetiler.util.ZoomFunction;
 import java.util.List;
+import java.util.Locale;
+import org.openmaptiles.generated.OpenMapTilesSchema;
+import org.openmaptiles.generated.Tables;
+import org.openmaptiles.util.OmtLanguageUtils;
 
 /**
  * Defines the logic for generating map elements for designated parks polygons and their label points in the {@code
@@ -70,7 +75,7 @@ import java.util.List;
 public class Park implements
   OpenMapTilesSchema.Park,
   Tables.OsmParkPolygon.Handler,
-  OpenMapTilesProfile.FeaturePostProcessor
+  ForwardingProfile.LayerPostProcessor
    {
 
 
@@ -159,7 +164,7 @@ public class Park implements
     for (VectorTile.Feature feature : items) {
       if (feature.geometry().geomType() == GeometryType.POINT && feature.hasGroup()) {
         int count = counts.getOrDefault(feature.group(), 0) + 1;
-        feature.attrs().put("rank", count);
+        feature.tags().put("rank", count);
         counts.put(feature.group(), count);
       }
     }

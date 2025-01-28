@@ -69,7 +69,8 @@ import org.openmaptiles.generated.Tables;
  */
 public class Landuse implements
   OpenMapTilesSchema.Landuse,
-  OpenMapTilesProfile.FeaturePostProcessor,
+  OpenMapTilesProfile.NaturalEarthProcessor,
+  ForwardingProfile.LayerPostProcessor,
   Tables.OsmLandusePolygon.Handler {
 
   private static final ZoomFunction<Number> MIN_PIXEL_SIZE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
@@ -128,20 +129,23 @@ public class Landuse implements
   public List<VectorTile.Feature> postProcess(int zoom,
     List<VectorTile.Feature> items) throws GeometryException {
     // List<VectorTile.Feature> toMerge = new ArrayList<>();
-    List<VectorTile.Feature> result = new ArrayList<>();
+    // List<VectorTile.Feature> result = new ArrayList<>();
     // for (var item : items) {
-    //   if (FieldValues.CLASS_RESIDENTIAL.equals(item.attrs().get(Fields.CLASS))) {
+    //   if (FieldValues.CLASS_RESIDENTIAL.equals(item.tags().get(Fields.CLASS))) {
     //     toMerge.add(item);
     //   } else {
     //     result.add(item);
     //   }
     // }
-    // return result;
-    var merged = zoom <= 12 ?
-      FeatureMerge.mergeNearbyPolygons(items, 1, 1, 0.1, 0.1) :
+    List<VectorTile.Feature> merged;
+    if (zoom <= 12) {
+      double minDistAndBuffer = MINDIST_AND_BUFFER_SIZES.ceilingEntry(zoom).getValue();
+      return FeatureMerge.mergeNearbyPolygons(toMerge, 1, 1, minDistAndBuffer, minDistAndBuffer);
+    } else {
       // reduces size of some heavy z13-14 tiles with lots of small polygons
-      FeatureMerge.mergeMultiPolygon(items);
-    result.addAll(merged);
-    return result;
+      return FeatureMerge.mergeMultiPolygon(items);
+    }
+    // result.addAll(merged);
+    // return result;
   }
 }

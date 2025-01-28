@@ -78,8 +78,8 @@ public class Water implements
   Tables.OsmWaterPolygon.Handler,
   OpenMapTilesProfile.NaturalEarthProcessor,
   OpenMapTilesProfile.OsmWaterPolygonProcessor,
-  ForwardingProfile.FeaturePostProcessor,
-  OpenMapTilesProfile.FinishHandler {
+  ForwardingProfile.LayerPostProcessor,
+  ForwardingProfile.FinishHandler {
 
   /*
    * At low zoom levels, use natural earth for oceans and major lakes, and at high zoom levels
@@ -140,7 +140,7 @@ public class Water implements
         if (geom.isValid()) {
           lakeInfo.geom = geom;
         } else {
-          LOGGER.debug("Fixing geometry of NE lake {}", feature.getLong("ne_id"));
+          LOGGER.trace("Fixing geometry of NE lake {}", feature.getLong("ne_id"));
           lakeInfo.geom = GeometryFixer.fix(geom);
         }
         lakeInfo.name = feature.getString("name");
@@ -217,7 +217,7 @@ public class Water implements
     if (!geom.isValid()) {
       geom = GeometryFixer.fix(geom);
       stats.dataError("omt_fix_water_before_ne_intersect");
-      LOGGER.debug("Fixing geometry of OSM element {} before attempt to add ID to natural earth water feature",
+      LOGGER.trace("Fixing geometry of OSM element {} before attempt to add ID to natural earth water feature",
         element.source().id());
     }
 

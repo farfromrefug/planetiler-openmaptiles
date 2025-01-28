@@ -78,15 +78,15 @@ import java.util.Set;
  * transportation_name sql files</a>.
  */
 public class TransportationName implements
-    OpenMapTilesSchema.TransportationName,
-    // Tables.OsmHighwayPoint.Handler,
-    Tables.OsmHighwayLinestring.Handler,
-    Tables.OsmAerialwayLinestring.Handler,
-    // Tables.OsmShipwayLinestring.Handler,
-    OpenMapTilesProfile.FeaturePostProcessor,
-    OpenMapTilesProfile.IgnoreWikidata,
-    ForwardingProfile.OsmNodePreprocessor,
-    ForwardingProfile.OsmWayPreprocessor {
+  OpenMapTilesSchema.TransportationName,
+  Tables.OsmHighwayPoint.Handler,
+  Tables.OsmHighwayLinestring.Handler,
+  Tables.OsmAerialwayLinestring.Handler,
+  Tables.OsmShipwayLinestring.Handler,
+  ForwardingProfile.LayerPostProcessor,
+  OpenMapTilesProfile.IgnoreWikidata,
+  ForwardingProfile.OsmNodePreprocessor,
+  ForwardingProfile.OsmWayPreprocessor {
 
   /*
    * Generate road names from OSM data. Route networkType and ref are copied
@@ -187,30 +187,30 @@ public class TransportationName implements
     }
   }
 
-  // @Override
-  // public void process(Tables.OsmHighwayPoint element, FeatureCollector
-  // features) {
-  // long id = element.source().id();
-  // byte value = motorwayJunctionHighwayClasses.getOrDefault(id, (byte) -1);
-  // if (value > 0) {
-  // HighwayClass cls = HighwayClass.from(value);
-  // if (cls != HighwayClass.UNKNOWN) {
-  // String subclass = FieldValues.SUBCLASS_JUNCTION;
-  // String ref = element.ref();
+  @Override
+  public void process(Tables.OsmHighwayPoint element, FeatureCollector
+  features) {
+  long id = element.source().id();
+  byte value = motorwayJunctionHighwayClasses.getOrDefault(id, (byte) -1);
+  if (value > 0) {
+  HighwayClass cls = HighwayClass.from(value);
+  if (cls != HighwayClass.UNKNOWN) {
+  String subclass = FieldValues.SUBCLASS_JUNCTION;
+  String ref = element.ref();
 
-  //       features.point(LAYER_NAME)
-  //         .setBufferPixels(BUFFER_SIZE)
-  //         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-  //         .setAttr(Fields.REF, ref)
-  //         .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
-  //         .setAttr(Fields.CLASS, highwayClass(cls.highwayValue, null, null, null))
-  //         .setAttr(Fields.SUBCLASS, subclass)
-  //         .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
-  //         .setSortKeyDescending(element.zOrder())
-  //         .setMinZoom(10);
-  //     }
-  //   }
-  // }
+        features.point(LAYER_NAME)
+          .setBufferPixels(BUFFER_SIZE)
+          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+          .setAttr(Fields.REF, ref)
+          .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
+          .setAttr(Fields.CLASS, highwayClass(cls.highwayValue, null, null, null))
+          .setAttr(Fields.SUBCLASS, subclass)
+          .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
+          .setSortKeyDescending(element.zOrder())
+          .setMinZoom(10);
+      }
+    }
+  }
 
   @Override
   public void process(Tables.OsmHighwayLinestring element, FeatureCollector features) {
@@ -336,19 +336,19 @@ public class TransportationName implements
     }
   }
 
-  // @Override
-  // public void process(Tables.OsmShipwayLinestring element, FeatureCollector features) {
-  //   if (!nullOrEmpty(element.name())) {
-  //     features.line(LAYER_NAME)
-  //       .setBufferPixels(BUFFER_SIZE)
-  //       .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
-  //       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-  //       .setAttr(Fields.CLASS, element.shipway())
-  //       .setMinPixelSize(0)
-  //       .setSortKey(element.zOrder())
-  //       .setMinZoom(12);
-  //   }
-  // }
+  @Override
+  public void process(Tables.OsmShipwayLinestring element, FeatureCollector features) {
+    if (!nullOrEmpty(element.name())) {
+      features.line(LAYER_NAME)
+        .setBufferPixels(BUFFER_SIZE)
+        .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
+        .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+        .setAttr(Fields.CLASS, element.shipway())
+        .setMinPixelSize(0)
+        .setSortKey(element.zOrder())
+        .setMinZoom(12);
+    }
+  }
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
@@ -365,8 +365,8 @@ public class TransportationName implements
     if (limitMerge) {
       // remove temp keys that were just used to improve line merging
       for (var feature : result) {
-        feature.attrs().remove(LINK_TEMP_KEY);
-        feature.attrs().remove(RELATION_ID_TEMP_KEY);
+        feature.tags().remove(LINK_TEMP_KEY);
+        feature.tags().remove(RELATION_ID_TEMP_KEY);
       }
     }
     return result;
