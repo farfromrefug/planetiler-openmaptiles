@@ -49,6 +49,7 @@ import org.openmaptiles.generated.OpenMapTilesSchema;
 import org.openmaptiles.generated.Tables;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.reader.osm.OsmElement;
 import com.onthegomap.planetiler.reader.osm.OsmRelationInfo;
 import com.onthegomap.planetiler.stats.Stats;
@@ -166,7 +167,7 @@ public class Building implements
         .setAttrWithMinzoom(Fields.RENDER_HEIGHT, nullIfInt(renderHeight, 5), 14)
         .setAttrWithMinzoom(Fields.RENDER_MIN_HEIGHT, nullIfInt(renderMinHeight, 0), 14)
         // .setAttrWithMinzoom(Fields.COLOUR, color, 14)
-        .setSimplifyUsingVW(true)
+        .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
         // .setPixelToleranceAtMaxZoom(256d / 4096 * 1.5)
         .setAttrWithMinzoom(Fields.HIDE_3D, hide3d, 14)
         // .setAttrWithMinzoom("amenity", nullIfEmpty(element.amenity()), 14)

@@ -398,7 +398,7 @@ public class Boundary
     Integer adminLevel = Parse.parseIntOrNull(
       element.source().getTag("admin_level")
     );
-    if (adminLevel != null &&  ((adminLevel == 2 || adminLevel == 4 || adminLevel == 6)) {
+    if (adminLevel != null &&  (adminLevel == 2 || adminLevel == 4 || adminLevel == 6)) {
       int minzoom = adminLevel == null
         ? 4
         : adminLevel <= 2 ? 1 : adminLevel <= 4 ? 3 : adminLevel <= 6 ? 6 : 4;

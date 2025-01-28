@@ -44,6 +44,7 @@ import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
@@ -126,7 +127,7 @@ public class LanduseUnder implements
     if (clazz != null) {
       var feature = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .setAttr(Fields.CLASS, clazz)
-        .setSimplifyUsingVW(true)
+        .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
         // .setPixelToleranceFactor(2.2)
         // .setMinPixelSizeFactor(2.5)
         // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
