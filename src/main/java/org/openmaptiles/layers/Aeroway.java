@@ -39,6 +39,7 @@ import com.onthegomap.planetiler.FeatureCollector;
 import org.openmaptiles.generated.OpenMapTilesSchema;
 import org.openmaptiles.generated.Tables;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Translations;
 
@@ -60,7 +61,7 @@ public class Aeroway implements
   public void process(Tables.OsmAerowayPolygon element, FeatureCollector features) {
     features.polygon(LAYER_NAME)
       .setMinZoom(10)
-      .setSimplifyUsingVW(true)
+      .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
       .setMinPixelSize(2)
       .setAttr(Fields.CLASS, element.aeroway())
       .setAttr(Fields.REF, element.ref());

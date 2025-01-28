@@ -47,6 +47,7 @@ import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.PolygonIndex;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.stats.Stats;
@@ -191,7 +192,7 @@ public class Water implements
         .setBufferPixels(BUFFER_SIZE)
         .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(clazz == FieldValues.CLASS_RIVER ? 8 : 6)
-        .setSimplifyUsingVW(true)
+        .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
         .setPixelToleranceFactor(0.8)
         .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
         .setAttrWithMinzoom(Fields.BRUNNEL, Utils.brunnel(element.isBridge(), element.isTunnel()), 12)

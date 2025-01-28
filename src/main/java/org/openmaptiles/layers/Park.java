@@ -53,6 +53,7 @@ import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.geo.GeometryType;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.SortKey;
 import com.onthegomap.planetiler.util.Translations;
@@ -114,7 +115,7 @@ public class Park implements
             null)
         // .setAttr(Fields.SUBCLASS, nullIfEmpty(protectionTitle))
         .setMinPixelSize(2)
-        .setSimplifyUsingVW(true)
+        .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
         .setPixelToleranceFactor(2.5)
         .setMinZoom(minzoom);
       // park name label point (if it has one)

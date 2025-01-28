@@ -45,6 +45,7 @@ import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Translations;
@@ -160,7 +161,7 @@ public class Landcover implements
           // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
           // .setPixelToleranceOverrides(PIXEL_TOLERANCE_THRESHOLDS)
           // .setPixelTolerance(tolerance)
-          .setSimplifyUsingVW(true)
+          .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
 
           .setPixelToleranceFactor(2.5)
           // default is 0.1, this helps reduce size of some heavy z7-10 tiles

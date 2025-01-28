@@ -147,7 +147,7 @@ public class Route implements
                     if (relation.distance == null) {
                         routeRelationData.computedDistance += feature.length() * 40075 / 2.0;
                     }
-                    routeRelationData.envelope.expandToInclude(feature.envelope());
+                    routeRelationData.envelope.expandToInclude(feature.worldGeometry().getEnvelopeInternal());
                 } catch (GeometryException e) {
                     e.log(stats, "route_decode", "Unable to get route length for " + feature.id());
                 }
