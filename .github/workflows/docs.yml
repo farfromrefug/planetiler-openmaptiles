@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Run link check
-        uses: gaurav-nelson/github-action-markdown-link-check@1.0.15
+        uses: gaurav-nelson/github-action-markdown-link-check@1.0.17
         with:
           use-quiet-mode: 'no'
           use-verbose-mode: 'yes'

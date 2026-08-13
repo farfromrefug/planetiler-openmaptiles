@@ -23,7 +23,6 @@
     <dependency>
       <groupId>org.yaml</groupId>
       <artifactId>snakeyaml</artifactId>
-      <version>1.33</version>
     </dependency>
     <dependency>
       <groupId>org.commonmark</groupId>
@@ -47,10 +46,11 @@
       </plugin>
 
       <plugin>
-        <artifactId>maven-deploy-plugin</artifactId>
+        <groupId>org.sonatype.central</groupId>
+        <artifactId>central-publishing-maven-plugin</artifactId>
         <configuration>
           <!-- we don't want to deploy this module -->
-          <skip>true</skip>
+          <skipPublishing>true</skipPublishing>
         </configuration>
       </plugin>
     </plugins>

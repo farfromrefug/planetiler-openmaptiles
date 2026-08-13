@@ -70,7 +70,7 @@ import org.openmaptiles.generated.Tables;
 public class Landuse implements
   OpenMapTilesSchema.Landuse,
   OpenMapTilesProfile.NaturalEarthProcessor,
-  OpenMapTilesProfile.FeaturePostProcessor,
+  ForwardingProfile.LayerPostProcessor,
   Tables.OsmLandusePolygon.Handler {
 
   private static final ZoomFunction<Number> MIN_PIXEL_SIZE_THRESHOLDS = ZoomFunction.fromMaxZoomThresholds(Map.of(
@@ -152,8 +152,9 @@ public class Landuse implements
     List<VectorTile.Feature> items) throws GeometryException {
     // List<VectorTile.Feature> toMerge = new ArrayList<>();
     List<VectorTile.Feature> result = new ArrayList<>();
+    // alpimaps: merge every landuse polygon, not only residential ones
     // for (var item : items) {
-    //   if (FieldValues.CLASS_RESIDENTIAL.equals(item.attrs().get(Fields.CLASS))) {
+    //   if (FieldValues.CLASS_RESIDENTIAL.equals(item.tags().get(Fields.CLASS))) {
     //     toMerge.add(item);
     //   } else {
     //     result.add(item);

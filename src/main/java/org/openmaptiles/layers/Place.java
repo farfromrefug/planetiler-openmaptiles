@@ -42,6 +42,7 @@ import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 
 import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -89,7 +90,7 @@ public class Place implements
   Tables.OsmIslandPolygon.Handler,
   Tables.OsmCityPoint.Handler,
   // Tables.OsmBoundaryPolygon.Handler,
-  OpenMapTilesProfile.FeaturePostProcessor {
+  ForwardingProfile.LayerPostProcessor {
 
   /*
    * Place labels locations and names come from OpenStreetMap, but we also join with natural
@@ -397,8 +398,8 @@ public class Place implements
     for (VectorTile.Feature feature : items) {
       int gridrank = groupCounts.getOrDefault(feature.group(), 1);
       groupCounts.put(feature.group(), gridrank + 1);
-      if (!feature.attrs().containsKey(Fields.RANK)) {
-        feature.attrs().put(Fields.RANK, 10 + gridrank);
+      if (!feature.tags().containsKey(Fields.RANK)) {
+        feature.tags().put(Fields.RANK, 10 + gridrank);
       }
     }
     return items;

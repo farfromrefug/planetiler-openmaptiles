@@ -35,6 +35,7 @@ See https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md for deta
 */
 package org.openmaptiles.layers;
 
+import static java.util.Map.entry;
 import static org.openmaptiles.util.Utils.coalesce;
 import static org.openmaptiles.util.Utils.nullIfEmpty;
 import static org.openmaptiles.util.Utils.nullIfLong;
@@ -43,6 +44,7 @@ import static com.onthegomap.planetiler.collection.FeatureGroup.SORT_KEY_BITS;
 import com.carrotsearch.hppc.LongIntMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -59,6 +61,7 @@ import com.onthegomap.planetiler.util.SortKey;
 import com.onthegomap.planetiler.util.Translations;
 import com.onthegomap.planetiler.util.ZoomFunction;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Defines the logic for generating map elements for designated parks polygons and their label points in the {@code
@@ -70,19 +73,22 @@ import java.util.List;
 public class Park implements
   OpenMapTilesSchema.Park,
   Tables.OsmParkPolygon.Handler,
-  OpenMapTilesProfile.FeaturePostProcessor
-   {
-
-
-  // constants for packing the minimum zoom ordering of park labels into the sort-key field
-  private static final int PARK_NATIONAL_PARK_BOOST = 1 << (SORT_KEY_BITS - 1);
-  private static final int PARK_WIKIPEDIA_BOOST = 1 << (SORT_KEY_BITS - 2);
+  ForwardingProfile.LayerPostProcessor {
 
   // constants for determining the minimum zoom level for a park label based on its area
   private static final double WORLD_AREA_FOR_70K_SQUARE_METERS =
     Math.pow(GeoUtils.metersToPixelAtEquator(0, Math.sqrt(90_000)) / 256d, 2);
   private static final double LOG2 = Math.log(2);
   private static final double SMALLEST_PARK_WORLD_AREA = Math.pow(4, -26); // 2^14 tiles, 2^12 pixels per tile
+  private static final Map<String, String> PROTECT_CLASS_MAP = Map.ofEntries(
+    entry("1a", "conservation"),
+    entry("1b", "wilderness_preserve"),
+    entry("2", "national_park"),
+    entry("3", "conservation"),
+    entry("4", "wildlife_refuge"),
+    entry("5", "conservation"),
+    entry("6", "sustainable")
+  );
 
   private final Stats stats;
   private final Translations translations;
@@ -92,12 +98,32 @@ public class Park implements
     this.translations = translations;
   }
 
+  private String parkClass(Tables.OsmParkPolygon element) {
+    if (element.maritime()) {
+      return "marine";
+    } else if ("national_park".equals(element.boundary())) {
+      return "national_park";
+    } else if ("protected_area".equals(element.boundary())) {
+      return coalesce(
+        nullIfEmpty(element.protectedArea()),
+        nullIfEmpty(element.protectClass()) == null ? null : PROTECT_CLASS_MAP.get(element.protectClass()),
+        nullIfEmpty(element.protectionTitle()),
+        "protected_area"
+      );
+    } else if ("nature_reserve".equals(element.leisure())) {
+      return "nature_reserve";
+    } else if ("recreation_ground".equals(element.leisure())) {
+      return "recreation_ground";
+    } else if (element.historic() != null && !element.historic().isEmpty()) {
+      return "historic";
+    } else {
+      return "nature_reserve";
+    }
+  }
+
   @Override
   public void process(Tables.OsmParkPolygon element, FeatureCollector features) {
-    // String protectionTitle = element.protectionTitle();
-    // if (protectionTitle != null) {
-    //   protectionTitle = protectionTitle.replace(' ', '_').toLowerCase(Locale.ROOT);
-    // }
+    // alpimaps: keep the raw boundary/leisure value as class instead of upstream's parkClass() mapping
     String clazz = coalesce(
       nullIfEmpty(element.boundary()),
       nullIfEmpty(element.leisure())
@@ -159,7 +185,7 @@ public class Park implements
     for (VectorTile.Feature feature : items) {
       if (feature.geometry().geomType() == GeometryType.POINT && feature.hasGroup()) {
         int count = counts.getOrDefault(feature.group(), 0) + 1;
-        feature.attrs().put("rank", count);
+        feature.tags().put("rank", count);
         counts.put(feature.group(), count);
       }
     }

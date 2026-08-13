@@ -43,6 +43,7 @@ import static java.util.Map.entry;
 
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -96,8 +97,8 @@ public class Transportation implements
   Tables.OsmSkiLinestring.Handler,
   Tables.OsmHighwayPolygon.Handler,
   OpenMapTilesProfile.NaturalEarthProcessor,
-  OpenMapTilesProfile.FeaturePostProcessor,
-  OpenMapTilesProfile.OsmRelationPreprocessor,
+  ForwardingProfile.LayerPostProcessor,
+  ForwardingProfile.OsmRelationPreprocessor,
   OpenMapTilesProfile.IgnoreWikidata {
 
   /*
@@ -133,7 +134,7 @@ public class Transportation implements
   );
   private static final Set<String> SURFACE_UNPAVED_VALUES = Set.of(
     "unpaved", "compacted", "dirt", "earth", "fine_gravel", "grass", "grass_paver", "gravel", "gravel_turf", "ground",
-    "ice", "mud", "pebblestone", "salt", "sand", "snow", "woodchips"
+    "ice", "mud", "pebblestone", "salt", "sand", "snow", "woodchips", "rock", "clay", "laterite"
   );
   private static final Set<String> SURFACE_PAVED_VALUES = Set.of(
     "paved", "asphalt", "cobblestone", "concrete", "concrete:lanes", "concrete:plates", "metal",
@@ -231,6 +232,24 @@ public class Transportation implements
   /** Returns a value for {@code service} tag constrained to a small set of known values from raw OSM data. */
   private static String service(String value) {
     return (value == null || !SERVICE_VALUES.contains(value)) ? null : value;
+  }
+
+  /**
+   * Returns a value for {@code official} field based on OSM {@code operator} and {@code informal} tags. Only applies to
+   * highway=path/footway/cycleway/bridleway.
+   */
+  private static Integer official(String highway, String informal, String operator) {
+    if (highway == null || !(highway.equals("path") || highway.equals("footway") ||
+      highway.equals("cycleway") || highway.equals("bridleway"))) {
+      return null;
+    }
+    if ("yes".equals(informal)) {
+      return 0;
+    }
+    if ("no".equals(informal) || !nullOrEmpty(operator)) {
+      return 1;
+    }
+    return null;
   }
 
   private static String railwayClass(String value) {
@@ -496,7 +515,12 @@ public class Transportation implements
         return;
       }
       String subclass = highwaySubclass(highwayClass, element.publicTransport(), highway);
-      int minzoom = getMinzoom(element, highwayClass, subclass);
+      var minZoomAndNewClass = getMinzoomAndClass(element, highwayClass, subclass);
+      int minzoom = minZoomAndNewClass.minzoom;
+
+      if (minzoom > config.maxzoom()) {
+        return;
+      }
 
       boolean highwayRamp = isLink(highway);
       Integer rampAboveZ12 = (highwayRamp || element.isRamp()) ? 1 : null;
@@ -506,7 +530,7 @@ public class Transportation implements
 
       FeatureCollector.Feature feature = features.line(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         // main attributes at all zoom levels (used for grouping <= z8)
-        .setAttr(Fields.CLASS, highwayClass)
+        .setAttr(Fields.CLASS, coalesce(minZoomAndNewClass.classOverride, highwayClass))
         .setAttr(Fields.SUBCLASS, subclass)
         // TODO: including brunnel at low zooms leads to some large 300-400+kb z4-7 tiles, instead
         //       we should only set brunnel if the line is above a certain length
@@ -520,6 +544,7 @@ public class Transportation implements
         .setAttrWithMinzoom(Fields.FOOT, "no".equals(element.foot()) ? 0 : null, 9)
         // .setAttrWithMinzoom(Fields.HORSE, nullIfEmpty(element.horse()), 9)
         // .setAttrWithMinzoom(Fields.MTB_SCALE, nullIfEmpty(element.mtbScale()), 9)
+        .setAttrWithMinzoom(Fields.OFFICIAL, official(highway, element.informal(), element.operator()), 9)
         .setAttrWithMinzoom("sac_scale", nullIfInt(translateSacScale(element.sacScale()), -1), 8)
         .setAttrWithMinzoom("tracktype",
           nullIfInt(translateTrackType((String) element.source().getTag("tracktype")), -1), 9)
@@ -553,7 +578,22 @@ public class Transportation implements
     }
   }
 
-  int getMinzoom(Tables.OsmHighwayLinestring element, String highwayClass, String subclass) {
+  private static final double TRUNK_Z0_UPGRADE_LENGTH = GeoUtils.metersToPixelAtEquator(0, 500);
+
+  private boolean isTrunkZ5MergeableLength(Tables.OsmHighwayLinestring element) {
+    try {
+      return element.source().length() < TRUNK_Z0_UPGRADE_LENGTH;
+    } catch (GeometryException e) {
+      e.log(stats, "omt_transportation_trunk_length",
+        "Unable to get feature length for trunk upgrade: " + element.source().id());
+      return false;
+    }
+  }
+
+  record MinZoomAndNewClass(int minzoom, ZoomFunction<String> classOverride) {}
+
+  MinZoomAndNewClass getMinzoomAndClass(Tables.OsmHighwayLinestring element, String highwayClass, String subclass) {
+    ZoomFunction<String> highwayClassOverride = null;
     List<RouteRelation> routeRelations = getRouteRelations(element);
     int routeRank = 3;
     for (var rel : routeRelations) {
@@ -581,11 +621,20 @@ public class Transportation implements
             14;
         case FieldValues.CLASS_TRUNK -> {
           boolean z5trunk = isTrunkForZ5(highway, routeRelations);
+
+          // Allow small trunk segments to be processed at z5 so they can merge with surrounding motorways
+          if (isTrunkZ5MergeableLength(element)) {
+            z5trunk = true;
+            highwayClassOverride =
+              z -> z <= 5 ? highwayClass.replace(baseClass, FieldValues.CLASS_MOTORWAY) : highwayClass;
+          }
+
           // and if it is good for Z5, it may be good also for Z4 (see CLASS_MOTORWAY bellow):
           String clazz = FieldValues.CLASS_TRUNK;
           if (z5trunk && isMotorwayWithNetworkForZ4(routeRelations)) {
             clazz = FieldValues.CLASS_MOTORWAY;
             z5trunk = false;
+            highwayClassOverride = null;
           }
           yield (z5trunk) ? 5 : MINZOOMS.getOrDefault(clazz, Integer.MAX_VALUE);
         }
@@ -598,7 +647,7 @@ public class Transportation implements
     if (isLink(highway) || isLink(construction)) {
       minzoom = Math.max(minzoom, 9);
     }
-    return minzoom;
+    return new MinZoomAndNewClass(minzoom, highwayClassOverride);
   }
 
   private boolean isPierPolygon(Tables.OsmHighwayLinestring element) {
@@ -723,16 +772,16 @@ public class Transportation implements
     // TODO merge preserving oneway instead ignoring
     int onewayId = 1;
     for (var item : items) {
-      var oneway = item.attrs().get(Fields.ONEWAY);
+      var oneway = item.tags().get(Fields.ONEWAY);
       if (oneway instanceof Number n && ONEWAY_VALUES.contains(n.intValue())) {
-        item.attrs().put(LIMIT_MERGE_TAG, onewayId++);
+        item.tags().put(LIMIT_MERGE_TAG, onewayId++);
       }
     }
 
     var merged = FeatureMerge.mergeLineStrings(items, minLength, tolerance, BUFFER_SIZE);
 
     for (var item : merged) {
-      item.attrs().remove(LIMIT_MERGE_TAG);
+      item.tags().remove(LIMIT_MERGE_TAG);
     }
     return merged;
   }
