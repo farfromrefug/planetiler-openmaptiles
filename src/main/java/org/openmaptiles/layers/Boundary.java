@@ -45,6 +45,7 @@ import static org.openmaptiles.util.Utils.nullIfString;
 import com.carrotsearch.hppc.LongObjectMap;
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.collection.Hppc;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
@@ -93,15 +94,14 @@ import org.slf4j.LoggerFactory;
  * <a href="https://github.com/openmaptiles/openmaptiles/tree/master/layers/boundary">OpenMapTiles boundary sql
  * files</a>.
  */
-public class Boundary
-  implements
-    OpenMapTilesSchema.Boundary,
-    OpenMapTilesProfile.NaturalEarthProcessor,
-    OpenMapTilesProfile.OsmRelationPreprocessor,
-    OpenMapTilesProfile.OsmAllProcessor,
-    Tables.OsmBoundaryPolygon.Handler,
-    OpenMapTilesProfile.FeaturePostProcessor,
-    OpenMapTilesProfile.FinishHandler {
+public class Boundary implements
+  OpenMapTilesSchema.Boundary,
+  OpenMapTilesProfile.NaturalEarthProcessor,
+  ForwardingProfile.OsmRelationPreprocessor,
+  OpenMapTilesProfile.OsmAllProcessor,
+  Tables.OsmBoundaryPolygon.Handler,
+  ForwardingProfile.LayerPostProcessor,
+  ForwardingProfile.FinishHandler {
 
   /*
    * Uses natural earth at lower zoom levels and OpenStreetMap at higher zoom levels.

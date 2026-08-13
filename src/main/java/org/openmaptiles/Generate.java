@@ -133,7 +133,7 @@ public class Generate {
   public static void main(String[] args) throws IOException {
     Arguments arguments = Arguments.fromArgsOrConfigFile(args);
     PlanetilerConfig planetilerConfig = PlanetilerConfig.from(arguments);
-    String tag = arguments.getString("tag", "openmaptiles tag to use", "v3.15.0");
+    String tag = arguments.getString("tag", "openmaptiles tag to use", "v3.16");
     String baseUrl = arguments.getString("base-url", "the url used to download the openmaptiles.yml",
       "https://raw.githubusercontent.com/openmaptiles/openmaptiles/");
     String base = baseUrl + tag + "/";
@@ -604,16 +604,16 @@ public class Generate {
    * "class") based on the "field mapping" defined in the layer schema definition.
    */
   static MultiExpression<String> generateFieldMapping(JsonNode valuesNode) {
-    MultiExpression<String> mapping = MultiExpression.of(new ArrayList<>());
+    List<MultiExpression.Entry<String>> mappings = new ArrayList<>();
     valuesNode.fields().forEachRemaining(entry -> {
       String field = entry.getKey();
       JsonNode node = entry.getValue();
       Expression expression = or(parseFieldMappingExpression(node).toList()).simplify();
       if (!expression.equals(or()) && !expression.equals(and())) {
-        mapping.expressions().add(MultiExpression.entry(field, expression));
+        mappings.add(MultiExpression.entry(field, expression));
       }
     });
-    return mapping;
+    return MultiExpression.of(mappings);
   }
 
   private static Stream<Expression> parseFieldMappingExpression(JsonNode node) {

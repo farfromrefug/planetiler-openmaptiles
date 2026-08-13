@@ -17,6 +17,7 @@ import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Translations;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 import org.openmaptiles.addons.ExtraLayers;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -41,7 +42,7 @@ import org.openmaptiles.layers.TransportationName;
  * </ul>
  * Layers can also subscribe to notifications when we finished processing an input source by implementing
  * {@link FinishHandler} or post-process features in that layer before rendering the output tile by implementing
- * {@link FeaturePostProcessor}.
+ * {@link LayerPostProcessor}.
  */
 public class OpenMapTilesProfile extends ForwardingProfile {
 
@@ -60,8 +61,7 @@ public class OpenMapTilesProfile extends ForwardingProfile {
   }
 
   public OpenMapTilesProfile(Translations translations, PlanetilerConfig config, Stats stats) {
-    List<String> onlyLayers = config.arguments().getList("only_layers", "Include only certain layers", List.of());
-    List<String> excludeLayers = config.arguments().getList("exclude_layers", "Exclude certain layers", List.of());
+    super(config);
 
     // register release/finish/feature postprocessor/osm relationship handler methods...
     List<Handler> layers = new ArrayList<>();
@@ -71,7 +71,7 @@ public class OpenMapTilesProfile extends ForwardingProfile {
     var extraLayers = ExtraLayers.create(translations, config, stats);
     var allLayers = Stream.concat(omtLayers.stream(), extraLayers.stream()).toList();
     for (Layer layer : allLayers) {
-      if ((onlyLayers.isEmpty() || onlyLayers.contains(layer.name())) && !excludeLayers.contains(layer.name())) {
+      if (caresAboutLayer(layer)) {
         layers.add(layer);
         registerHandler(layer);
         if (layer instanceof TransportationName transportationName) {
@@ -133,13 +133,18 @@ public class OpenMapTilesProfile extends ForwardingProfile {
       registerSourceHandler(OSM_SOURCE, (source, features) -> {
         for (var match : getTableMatches(source)) {
           RowDispatch rowDispatch = match.match();
-          var row = rowDispatch.constructor.create(source, match.keys().get(0));
+          var row = rowDispatch.constructor.create(source, match.keys().getFirst());
           for (Tables.RowHandler<Tables.Row> handler : rowDispatch.handlers()) {
             handler.process(row, features);
           }
         }
       });
     }
+  }
+
+  @Override
+  public Map<String, List<String>> dependsOnLayer() {
+    return Map.of("transportation_name", List.of("transportation"));
   }
 
   /** Returns the imposm3 table row constructors that match an input element's tags. */
@@ -150,16 +155,13 @@ public class OpenMapTilesProfile extends ForwardingProfile {
   @Override
   public boolean caresAboutWikidataTranslation(OsmElement elem) {
     var tags = elem.tags();
-    if (elem instanceof OsmElement.Node) {
-      return wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_POINT, tags), false);
-    } else if (elem instanceof OsmElement.Way) {
-      return wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_POLYGON, tags), false) ||
+    return switch (elem) {
+      case OsmElement.Node ignored -> wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_POINT, tags), false);
+      case OsmElement.Way ignored -> wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_POLYGON, tags), false) ||
         wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_LINE, tags), false);
-    } else if (elem instanceof OsmElement.Relation) {
-      return wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_POLYGON, tags), false);
-    } else {
-      return false;
-    }
+      case OsmElement.Relation ignored -> wikidataMappings.getOrElse(SimpleFeature.create(EMPTY_POLYGON, tags), false);
+      default -> false;
+    };
   }
 
   /*
@@ -265,7 +267,7 @@ public class OpenMapTilesProfile extends ForwardingProfile {
    */
   public interface IgnoreWikidata {}
 
-  private record RowDispatch(
+  public record RowDispatch(
     Tables.Constructor constructor,
     List<Tables.RowHandler<Tables.Row>> handlers
   ) {}

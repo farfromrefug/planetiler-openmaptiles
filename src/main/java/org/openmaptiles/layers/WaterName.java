@@ -218,7 +218,8 @@ public class WaterName implements
 
   @Override
   public void process(Tables.OsmWaterPolygon element, FeatureCollector features) {
-    if (nullIfEmpty(element.name()) != null && !element.source().hasTag("amenity")) {
+    if (nullIfEmpty(element.name()) != null && !element.source().hasTag("amenity") &&
+      !"swimming_pool".equals(element.leisure())) {
       Geometry centerlineGeometry = lakeCenterlines.get(element.source().id());
       int minzoomCL = MINZOOM_BAY;
       String place = element.place();

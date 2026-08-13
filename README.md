@@ -8,10 +8,10 @@ on [OpenMapTiles](https://github.com/openmaptiles/openmaptiles).
 Using pre-built docker image:
 
 ```bash
-docker run -v "$(pwd)/data":/data openmaptiles/planetiler-openmaptiles:latest --force --download --area=monaco
+docker run --rm -v "$(pwd)/data":/data openmaptiles/planetiler-openmaptiles:latest --force --download --area=monaco
 ```
 
-Or to build from source, after [installing Java 21+](https://adoptium.net/installation.html):
+Or to build from source, after [installing Java 21+](https://adoptium.net/installation):
 
 ```bash
 # Build the project (use mvnw.cmd on windows):
@@ -32,6 +32,7 @@ available options.
   or wikipedia page or name)
 - Some line and polygon tolerances are different, can be tweaked with `--simplify-tolerance` parameter
 - For bigger bays whose label points show above Z9, centerline is used for Z9+
+- MVT IDs encoded as `{ID} * 10 + {1 for OSM nodes, 2 for OSM ways, 3 for OSM relations, 0 for any other source}` by default
 
 ## Customizing
 
@@ -150,7 +151,7 @@ script with the
 OpenMapTiles release tag:
 
 ```bash
-./scripts/regenerate-openmaptiles.sh v3.15
+./scripts/regenerate-openmaptiles.sh v3.16
 ```
 
 Then follow the instructions it prints for reformatting generated code.
@@ -158,7 +159,7 @@ Then follow the instructions it prints for reformatting generated code.
 If you want to regenerate from a different repository than the default openmaptiles, you can specify the url like this:
 
 ```bash
-./scripts/regenerate-openmaptiles.sh v3.15 https://raw.githubusercontent.com/openmaptiles/openmaptiles/
+./scripts/regenerate-openmaptiles.sh v3.16 https://raw.githubusercontent.com/openmaptiles/openmaptiles/
 ```
 
 ## License
