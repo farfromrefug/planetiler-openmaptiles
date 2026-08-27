@@ -106,10 +106,41 @@ public class Water implements
     8, 1
   ));
 
+  /**
+   * Extra simplification for swimming pools. They are mapped as long vertex chains approximating
+   * curves - around 100 coordinates each - for a shape only a few pixels across, and
+   * MIN_PIXEL_SIZE_THRESHOLDS stops culling at z11, so all of that detail reaches z11-z14 intact.
+   * setPixelToleranceFactor cannot be used for this: that setter is dead in FeatureCollector, and
+   * getPixelToleranceAtZoom ignores it at max zoom regardless, which is where most pools live.
+   * <p>
+   * Pools also switch to Douglas-Peucker. The layer's usual Visvalingam-Whyatt drops lowest-area
+   * vertices first, which is the wrong instinct at this scale: a two-pixel pool collapses to empty
+   * geometry and the feature disappears. Douglas-Peucker keeps the extremes, so the outline
+   * survives while the vertices between go. Measured on rhone-alpes, pools at z14:
+   *
+   * <pre>
+   *   setting          pools kept   vertices   per pool   layer bytes
+   *   none (today)           5940     588086         99       6067563
+   *   VW  @ 0.5px            5815     469002         81       5791946
+   *   VW  @ 1px              1334      10653          8       4494863
+   *   DP  @ 1px              5817     357873         62       5556810
+   *   DP  @ 2px              5814     356393         61       5553699
+   * </pre>
+   * <p>
+   * 1px is the setting to use: it keeps 97.9% of pools while removing 39% of their vertices, worth
+   * -511 KB, or -0.16% of total tile bytes. Past 1px the curve flattens - 2px buys 3 KB more and
+   * costs 3 more pools. Defaults to 0 so output is unchanged unless asked for.
+   */
+  private final double poolTolerance;
+
   public Water(Translations translations, PlanetilerConfig config, Stats stats) {
     this.classMapping = FieldMappings.Class.index();
     this.config = config;
     this.stats = stats;
+    this.poolTolerance = config.arguments().getDouble("water_pool_tolerance",
+      "water: pixel tolerance for swimming pools at max zoom, also switches them to " +
+        "Douglas-Peucker (0 = leave default, 1 is the measured sweet spot)",
+      0);
   }
 
   @Override
@@ -188,7 +219,7 @@ public class Water implements
     if (!"bay".equals(element.natural())) {
       String clazz = "riverbank".equals(element.waterway()) ? FieldValues.CLASS_RIVER :
         classMapping.getOrElse(element.source(), FieldValues.CLASS_LAKE);
-      features.polygon(LAYER_NAME)
+      var feature = features.polygon(LAYER_NAME)
         .setBufferPixels(BUFFER_SIZE)
         .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(clazz == FieldValues.CLASS_RIVER ? 8 : 6)
@@ -197,6 +228,12 @@ public class Water implements
         .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
         .setAttrWithMinzoom(Fields.BRUNNEL, Utils.brunnel(element.isBridge(), element.isTunnel()), 12)
         .setAttr(Fields.CLASS, Utils.nullIfString(clazz, FieldValues.CLASS_LAKE));
+
+      if (poolTolerance > 0 && FieldValues.CLASS_SWIMMING_POOL.equals(clazz)) {
+        feature
+          .setPixelToleranceAtMaxZoom(poolTolerance)
+          .setSimplifyMethod(SimplifyMethod.DOUGLAS_PEUCKER);
+      }
 
       try {
         attemptNeLakeIdMapping(element);
