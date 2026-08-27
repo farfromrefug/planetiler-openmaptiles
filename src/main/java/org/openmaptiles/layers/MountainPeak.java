@@ -182,7 +182,10 @@ public class MountainPeak implements
       .setAttr(Fields.CLASS, clazz)
       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
       .setMinZoom("cliff".equals(clazz) ? 12 : 10)
-      .setBufferPixels(100);
+      // the 100px buffer is only needed for peak POINTS, which postProcess() culls back down
+      // afterwards. postProcess() never culls linestrings, so a wide buffer here just duplicates
+      // cliff/ridge geometry into every neighbouring tile and keeps it there.
+      .setBufferPixels(16);
   }
 
   /** Returns true if {@code element} is a point in an area where feet are used insead of meters (the US). */
