@@ -563,7 +563,6 @@ public class Transportation implements
           12)
         .setAttrWithMinzoom(Fields.SURFACE, surface(highwayClass,coalesce(element.surface(), element.tracktype())), 12)
         .setMinPixelSize(0) // merge during post-processing, then limit by size
-        // .setPixelToleranceFactor(1.6)
 
         // .setPixelTolerance(0)
         // .setMinPixelSizeFactor(0.2)

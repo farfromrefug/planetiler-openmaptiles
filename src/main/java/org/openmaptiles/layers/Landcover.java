@@ -115,8 +115,9 @@ public class Landcover implements
    */
   private final boolean mergeMaxZoom;
   /**
-   * Extra simplification for z11-13. The layer asks for it via setPixelToleranceFactor(2.5), but
-   * that setter is dead in FeatureCollector, so today those zooms get no extra tolerance at all.
+   * Extra simplification for z11-13. Without this those zooms get no extra tolerance at all:
+   * setPixelToleranceOverrides is the only setter that reaches them, since setPixelTolerance is the
+   * fallback and the max zoom has its own value.
    */
   private final double toleranceZ11to13;
 
@@ -186,7 +187,6 @@ public class Landcover implements
           // .setPixelTolerance(tolerance)
           .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
 
-          .setPixelToleranceFactor(2.5)
           // default is 0.1, this helps reduce size of some heavy z7-10 tiles.
           // setPixelToleranceBelowZoom replaces all previous overrides, so z11-13 has to go in the
           // same ZoomFunction rather than a second call.

@@ -100,14 +100,6 @@ public class Route implements
     private final PlanetilerConfig config;
     private final HashMap<Long, RouteRelationData> routeRelationDatas = new HashMap<>();
 
-    /** Drop the per-tile "extent" bbox string. It is relation-global, so every tile a route crosses
-     * repeats it. Recoverable from the relation metadata or from the geometry itself. */
-    private final boolean dropExtent;
-    /** Keep only osmid/class/network on tile features and leave the rest of the relation metadata
-     * (name, ref, symbol, ascent, descent, distance, extent) to a side lookup keyed by osmid. */
-    private final boolean slimAttrs;
-    /** Actually pass the computed minLength to mergeLineStrings instead of the hardcoded 0. */
-    private final boolean useMinLength;
     /** Halve the merge tolerance so route geometry is simplified exactly like the transportation
      * layer - otherwise a route drawn over its own track visibly diverges as you zoom. */
     private final boolean roadTolerance;
@@ -124,12 +116,6 @@ public class Route implements
         this.config = config;
         this.stats = stats;
         var arguments = config.arguments();
-        this.slimAttrs = arguments.getBoolean("route_slim_attrs",
-            "route layer: emit only osmid/class/network per tile, relation metadata goes in a side lookup", false);
-        this.dropExtent = slimAttrs || arguments.getBoolean("route_drop_extent",
-            "route layer: do not emit the per-tile relation bbox 'extent' attribute", false);
-        this.useMinLength = arguments.getBoolean("route_min_length",
-            "route layer: cull sub-minLength merged segments instead of keeping everything", false);
         this.roadTolerance = arguments.getBoolean("route_road_tolerance",
             "route layer: use the same merge tolerance as the transportation layer", false);
         this.extentDigits = arguments.getInteger("route_extent_digits",
@@ -241,26 +227,25 @@ public class Route implements
                 //     LOGGER.warn("processAllOsm route: " + name);
                 // }
                 String symbol = nullIfEmpty(relation.symbol());
-                var line = features.line(LAYER_NAME)
+                features.line(LAYER_NAME)
                     .setBufferPixels(BUFFER_SIZE)
                     .setAttr("osmid", relId)
                     .setAttr("network", networkType)
                     .setAttr(Fields.CLASS, clazz)
                     .setMinZoom(minzoom)
                     .setSortKey(feature.getWayZorder())
-                    .setMinPixelSize(0);
-                if (!slimAttrs) {
-                    line
-                        .setAttr("ref", relation.ref())
-                        .setAttr("ascent",
-                            relation.ascent() != null ? nullIfLong(Math.round(relation.ascent()), 0) : null)
-                        .setAttr("descent",
-                            relation.descent() != null ? nullIfLong(Math.round(relation.descent()), 0) : null)
-                        .setAttr("distance",
-                            relation.distance() != null ? nullIfLong(Math.round(relation.distance()), 0) : null)
-                        .setAttr("symbol", symbol == null ? null : symbolIds ? symbolId(symbol) : symbol)
-                        .setAttr("name", name);
-                }
+                    .setMinPixelSize(0)
+                    .setAttr("ref", relation.ref())
+                    .setAttr("ascent",
+                        relation.ascent() != null ? nullIfLong(Math.round(relation.ascent()), 0) : null)
+                    .setAttr("descent",
+                        relation.descent() != null ? nullIfLong(Math.round(relation.descent()), 0) : null)
+                    .setAttr("distance",
+                        relation.distance() != null ? nullIfLong(Math.round(relation.distance()), 0) : null)
+                    // symbolIds swaps the string for an integer id plus a sidecar lookup - the same
+                    // information, stored once per archive instead of once per tile
+                    .setAttr("symbol", symbol == null ? null : symbolIds ? symbolId(symbol) : symbol)
+                    .setAttr("name", name);
             }
         }
     }
@@ -350,7 +335,6 @@ public class Route implements
         //     .setAttr("ref", ref)
         //     .setAttr("name", name)
         //     .setMinZoom(minzoom)
-        //     // .setPixelToleranceFactor(0.8)
         //     // details only at higher zoom levels so that named rivers can be merged more aggressively
         //     // at lower zoom levels, we'll merge linestrings and limit length/clip afterwards
         //     .setBufferPixelOverrides(MIN_PIXEL_LENGTHS)
@@ -370,28 +354,23 @@ public class Route implements
     @Override
     public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
 
-        if (!slimAttrs || !dropExtent) {
-            for (int i = 0; i < items.size(); i++) {
-                var attrs = items.get(i).attrs();
-                Long relId = (Long) attrs.get("osmid");
-                var routeRelationData = routeRelationDatas.get(relId);
-                if (routeRelationData != null) {
-                    if (!dropExtent) {
-                        var latLngBounds = GeoUtils.toLatLonBoundsBounds(routeRelationData.envelope);
-                        DecimalFormat df =
-                            new DecimalFormat(extentDigits <= 0 ? "#" : "#." + "0".repeat(extentDigits));
-                        String extent = df.format(latLngBounds.getMinX()) + "," +
-                            df.format(latLngBounds.getMinY()) + "," + df.format(latLngBounds.getMaxX()) +
-                            "," + df.format(latLngBounds.getMaxY());
-                        attrs.put("extent", extent);
-                    }
-                    if (!slimAttrs && attrs.get("distance") == null) {
-                        attrs.put("distance", nullIfLong(Math.round(routeRelationData.computedDistance), 0));
-                    }
+        for (int i = 0; i < items.size(); i++) {
+            var attrs = items.get(i).attrs();
+            Long relId = (Long) attrs.get("osmid");
+            var routeRelationData = routeRelationDatas.get(relId);
+            if (routeRelationData != null) {
+                var latLngBounds = GeoUtils.toLatLonBoundsBounds(routeRelationData.envelope);
+                DecimalFormat df =
+                    new DecimalFormat(extentDigits <= 0 ? "#" : "#." + "0".repeat(extentDigits));
+                String extent = df.format(latLngBounds.getMinX()) + "," +
+                    df.format(latLngBounds.getMinY()) + "," + df.format(latLngBounds.getMaxX()) +
+                    "," + df.format(latLngBounds.getMaxY());
+                attrs.put("extent", extent);
+                if (attrs.get("distance") == null) {
+                    attrs.put("distance", nullIfLong(Math.round(routeRelationData.computedDistance), 0));
                 }
             }
         }
-        double minLength = config.minFeatureSize(zoom) / 2.0;
         // Transportation.postProcess uses config.tolerance(zoom) * 0.5 - match it so a route and the
         // track it follows stay on top of each other at every zoom
         double tolerance = roadTolerance ? config.tolerance(zoom) * 0.5 : config.tolerance(zoom);
@@ -401,8 +380,8 @@ public class Route implements
         //     LOGGER.warn("route merging " + zoom + " " + tolerance + " " + items.size());
 
         // }
-        double lengthLimit = useMinLength && zoom < config.maxzoom() ? minLength : 0.0;
-        items = FeatureMerge.mergeLineStrings(items, attrs -> lengthLimit, tolerance, BUFFER_SIZE);
+        // length limit stays 0: merging may join segments, but nothing is ever dropped
+        items = FeatureMerge.mergeLineStrings(items, attrs -> 0.0, tolerance, BUFFER_SIZE);
         // if (zoom==6) {
         //     LOGGER.warn("route merging done " + zoom + " " + tolerance + " " + items.size() + " " + items.get(0).attrs().get("name"));
 

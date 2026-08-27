@@ -128,7 +128,6 @@ public class Landuse implements
       var feature = features.polygon(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
         .setAttr(Fields.CLASS, clazz)
         .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
-        // .setPixelToleranceFactor(2.2)
         // .setMinPixelSizeFactor(2.5)
         // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(Z6_CLASSES.contains(clazz) ? 6 : 9);

@@ -110,8 +110,9 @@ public class Water implements
    * Extra simplification for swimming pools. They are mapped as long vertex chains approximating
    * curves - around 100 coordinates each - for a shape only a few pixels across, and
    * MIN_PIXEL_SIZE_THRESHOLDS stops culling at z11, so all of that detail reaches z11-z14 intact.
-   * setPixelToleranceFactor cannot be used for this: that setter is dead in FeatureCollector, and
-   * getPixelToleranceAtZoom ignores it at max zoom regardless, which is where most pools live.
+   * This has to go through setPixelToleranceAtMaxZoom rather than the layer-wide tolerance:
+   * getPixelToleranceAtZoom returns pixelToleranceAtMaxZoom unconditionally at max zoom, which is
+   * where most pools live.
    * <p>
    * Pools also switch to Douglas-Peucker. The layer's usual Visvalingam-Whyatt drops lowest-area
    * vertices first, which is the wrong instinct at this scale: a two-pixel pool collapses to empty
@@ -224,7 +225,6 @@ public class Water implements
         .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(clazz == FieldValues.CLASS_RIVER ? 8 : 6)
         .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
-        .setPixelToleranceFactor(0.8)
         .setAttr(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null)
         .setAttrWithMinzoom(Fields.BRUNNEL, Utils.brunnel(element.isBridge(), element.isTunnel()), 12)
         .setAttr(Fields.CLASS, Utils.nullIfString(clazz, FieldValues.CLASS_LAKE));
