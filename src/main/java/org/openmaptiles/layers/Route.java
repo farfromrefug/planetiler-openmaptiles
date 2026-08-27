@@ -41,6 +41,7 @@ import static org.openmaptiles.util.Utils.nullIfLong;
 
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
+import com.onthegomap.planetiler.ForwardingProfile;
 import com.onthegomap.planetiler.VectorTile;
 import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.geo.GeoUtils;
@@ -55,10 +56,17 @@ import com.onthegomap.planetiler.reader.osm.OsmRelationInfo;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
 import com.onthegomap.planetiler.util.Translations;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import org.locationtech.jts.geom.Envelope;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,7 +77,8 @@ public class Route implements
     Tables.OsmRouteLinestring.Handler,
     OpenMapTilesProfile.FeaturePostProcessor,
     OpenMapTilesProfile.OsmRelationPreprocessor,
-    OpenMapTilesProfile.OsmAllProcessor {
+    OpenMapTilesProfile.OsmAllProcessor,
+    ForwardingProfile.FinishHandler {
 
     class RouteRelationData {
         Double computedDistance = 0.0;
@@ -91,9 +100,81 @@ public class Route implements
     private final PlanetilerConfig config;
     private final HashMap<Long, RouteRelationData> routeRelationDatas = new HashMap<>();
 
+    /** Drop the per-tile "extent" bbox string. It is relation-global, so every tile a route crosses
+     * repeats it. Recoverable from the relation metadata or from the geometry itself. */
+    private final boolean dropExtent;
+    /** Keep only osmid/class/network on tile features and leave the rest of the relation metadata
+     * (name, ref, symbol, ascent, descent, distance, extent) to a side lookup keyed by osmid. */
+    private final boolean slimAttrs;
+    /** Actually pass the computed minLength to mergeLineStrings instead of the hardcoded 0. */
+    private final boolean useMinLength;
+    /** Halve the merge tolerance so route geometry is simplified exactly like the transportation
+     * layer - otherwise a route drawn over its own track visibly diverges as you zoom. */
+    private final boolean roadTolerance;
+    /** Decimal places kept in the "extent" bbox string. 3 is ~110m, far finer than a bbox needs. */
+    private final int extentDigits;
+    /** Replace the osmc:symbol string with a dense integer id, and write the id -> string table to
+     * a sidecar json so it can be stored once in the archive instead of once per tile. */
+    private final boolean symbolIds;
+    private final Path symbolTablePath;
+    private final ConcurrentHashMap<String, Integer> symbolRegistry = new ConcurrentHashMap<>();
+    private final AtomicInteger nextSymbolId = new AtomicInteger();
+
     public Route(Translations translations, PlanetilerConfig config, Stats stats) {
         this.config = config;
         this.stats = stats;
+        var arguments = config.arguments();
+        this.slimAttrs = arguments.getBoolean("route_slim_attrs",
+            "route layer: emit only osmid/class/network per tile, relation metadata goes in a side lookup", false);
+        this.dropExtent = slimAttrs || arguments.getBoolean("route_drop_extent",
+            "route layer: do not emit the per-tile relation bbox 'extent' attribute", false);
+        this.useMinLength = arguments.getBoolean("route_min_length",
+            "route layer: cull sub-minLength merged segments instead of keeping everything", false);
+        this.roadTolerance = arguments.getBoolean("route_road_tolerance",
+            "route layer: use the same merge tolerance as the transportation layer", false);
+        this.extentDigits = arguments.getInteger("route_extent_digits",
+            "route layer: decimal places in the 'extent' bbox string", 3);
+        this.symbolIds = arguments.getBoolean("route_symbol_id",
+            "route layer: emit osmc:symbol as an integer id plus a sidecar lookup table", false);
+        this.symbolTablePath = Path.of(arguments.getString("route_symbol_table",
+            "route layer: where to write the symbol id table when route_symbol_id is set",
+            "route_symbols.json"));
+    }
+
+    /**
+     * Stable dense id per distinct symbol string.
+     * <p>
+     * The counter is an AtomicInteger rather than symbolRegistry.size(). This runs on the OSM
+     * processing pool, and reading the map's own size() inside computeIfAbsent lets two threads
+     * inserting into different bins both observe the same size and hand out the same id.
+     */
+    private int symbolId(String symbol) {
+        return symbolRegistry.computeIfAbsent(symbol, s -> nextSymbolId.incrementAndGet());
+    }
+
+    @Override
+    public void finish(String sourceName, FeatureCollector.Factory featureCollectors,
+        Consumer<FeatureCollector.Feature> next) {
+        if (!symbolIds || !"osm".equals(sourceName) || symbolRegistry.isEmpty()) {
+            return;
+        }
+        var byId = new TreeMap<Integer, String>();
+        symbolRegistry.forEach((symbol, id) -> byId.put(id, symbol));
+        var json = new StringBuilder("{");
+        for (var entry : byId.entrySet()) {
+            if (json.length() > 1) {
+                json.append(',');
+            }
+            json.append('"').append(entry.getKey()).append("\":")
+                .append('"').append(entry.getValue().replace("\\", "\\\\").replace("\"", "\\\"")).append('"');
+        }
+        json.append('}');
+        try {
+            Files.writeString(symbolTablePath, json.toString());
+            LOGGER.info("wrote {} route symbols to {}", byId.size(), symbolTablePath);
+        } catch (IOException e) {
+            LOGGER.warn("could not write route symbol table to {}: {}", symbolTablePath, e.toString());
+        }
     }
 
     private Integer getNetworkType(String network) {
@@ -160,22 +241,26 @@ public class Route implements
                 //     LOGGER.warn("processAllOsm route: " + name);
                 // }
                 String symbol = nullIfEmpty(relation.symbol());
-                features.line(LAYER_NAME)
+                var line = features.line(LAYER_NAME)
                     .setBufferPixels(BUFFER_SIZE)
-                    .setAttr("ref", relation.ref())
                     .setAttr("osmid", relId)
                     .setAttr("network", networkType)
-                    .setAttr("ascent", relation.ascent() != null ? nullIfLong(Math.round(relation.ascent()), 0) : null)
-                    .setAttr("descent",
-                        relation.descent() != null ? nullIfLong(Math.round(relation.descent()), 0) : null)
-                    .setAttr("distance",
-                        relation.distance() != null ? nullIfLong(Math.round(relation.distance()), 0) : null)
-                    .setAttr("symbol", symbol)
                     .setAttr(Fields.CLASS, clazz)
-                    .setAttr("name", name)
                     .setMinZoom(minzoom)
                     .setSortKey(feature.getWayZorder())
                     .setMinPixelSize(0);
+                if (!slimAttrs) {
+                    line
+                        .setAttr("ref", relation.ref())
+                        .setAttr("ascent",
+                            relation.ascent() != null ? nullIfLong(Math.round(relation.ascent()), 0) : null)
+                        .setAttr("descent",
+                            relation.descent() != null ? nullIfLong(Math.round(relation.descent()), 0) : null)
+                        .setAttr("distance",
+                            relation.distance() != null ? nullIfLong(Math.round(relation.distance()), 0) : null)
+                        .setAttr("symbol", symbol == null ? null : symbolIds ? symbolId(symbol) : symbol)
+                        .setAttr("name", name);
+                }
             }
         }
     }
@@ -285,31 +370,39 @@ public class Route implements
     @Override
     public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
 
-        for (int i = 0; i < items.size(); i++) {
-            var attrs = items.get(i).attrs();
-            Long relId = (Long) attrs.get("osmid");
-            var routeRelationData = routeRelationDatas.get(relId);
-            if (routeRelationData != null) {
-                var latLngBounds = GeoUtils.toLatLonBoundsBounds(routeRelationData.envelope);
-                DecimalFormat df = new DecimalFormat("#.000");
-                String extent = df.format(latLngBounds.getMinX()) + "," +
-                    df.format(latLngBounds.getMinY()) + "," + df.format(latLngBounds.getMaxX()) +
-                    "," + df.format(latLngBounds.getMaxY());
-                attrs.put("extent", extent);
-                if (attrs.get("distance") == null) {
-                    attrs.put("distance", nullIfLong(Math.round(routeRelationData.computedDistance), 0));
+        if (!slimAttrs || !dropExtent) {
+            for (int i = 0; i < items.size(); i++) {
+                var attrs = items.get(i).attrs();
+                Long relId = (Long) attrs.get("osmid");
+                var routeRelationData = routeRelationDatas.get(relId);
+                if (routeRelationData != null) {
+                    if (!dropExtent) {
+                        var latLngBounds = GeoUtils.toLatLonBoundsBounds(routeRelationData.envelope);
+                        DecimalFormat df =
+                            new DecimalFormat(extentDigits <= 0 ? "#" : "#." + "0".repeat(extentDigits));
+                        String extent = df.format(latLngBounds.getMinX()) + "," +
+                            df.format(latLngBounds.getMinY()) + "," + df.format(latLngBounds.getMaxX()) +
+                            "," + df.format(latLngBounds.getMaxY());
+                        attrs.put("extent", extent);
+                    }
+                    if (!slimAttrs && attrs.get("distance") == null) {
+                        attrs.put("distance", nullIfLong(Math.round(routeRelationData.computedDistance), 0));
+                    }
                 }
             }
         }
         double minLength = config.minFeatureSize(zoom) / 2.0;
-        double tolerance = config.tolerance(zoom);
+        // Transportation.postProcess uses config.tolerance(zoom) * 0.5 - match it so a route and the
+        // track it follows stay on top of each other at every zoom
+        double tolerance = roadTolerance ? config.tolerance(zoom) * 0.5 : config.tolerance(zoom);
         // double tolerance = zoom== 7 ? 100 : config.tolerance(zoom);
         // if (zoom==6) {
         //     tolerance = 2000;
         //     LOGGER.warn("route merging " + zoom + " " + tolerance + " " + items.size());
 
         // }
-        items = FeatureMerge.mergeLineStrings(items, attrs -> 0.0, tolerance, BUFFER_SIZE);
+        double lengthLimit = useMinLength && zoom < config.maxzoom() ? minLength : 0.0;
+        items = FeatureMerge.mergeLineStrings(items, attrs -> lengthLimit, tolerance, BUFFER_SIZE);
         // if (zoom==6) {
         //     LOGGER.warn("route merging done " + zoom + " " + tolerance + " " + items.size() + " " + items.get(0).attrs().get("name"));
 

@@ -35,6 +35,8 @@ See https://github.com/openmaptiles/openmaptiles/blob/master/LICENSE.md for deta
 */
 package org.openmaptiles.layers;
 
+import static org.openmaptiles.util.Utils.coalesce;
+
 import com.onthegomap.planetiler.FeatureCollector;
 import com.onthegomap.planetiler.FeatureMerge;
 import com.onthegomap.planetiler.ForwardingProfile;
@@ -105,8 +107,28 @@ public class Landcover implements
   private static final MultiExpression.Index<String> subclassMapping = FieldMappings.Subclass.index();
 
   private final Stats stats;
+  /** Skip the subclass attribute when it is just a copy of class. */
+  private final boolean dropRedundantSubclass;
+  /**
+   * Merge overlapping polygons at max zoom too. Upstream stops at z13, so z14 - which holds most of
+   * the bytes in a country extract - ships every wood/grass polygon unmerged.
+   */
+  private final boolean mergeMaxZoom;
+  /**
+   * Extra simplification for z11-13. The layer asks for it via setPixelToleranceFactor(2.5), but
+   * that setter is dead in FeatureCollector, so today those zooms get no extra tolerance at all.
+   */
+  private final double toleranceZ11to13;
+
   public Landcover(Translations translations, PlanetilerConfig config, Stats stats) {
     this.stats = stats;
+    var arguments = config.arguments();
+    this.dropRedundantSubclass = arguments.getBoolean("landcover_drop_redundant_subclass",
+      "landcover: omit subclass when it equals class", false);
+    this.mergeMaxZoom = arguments.getBoolean("landcover_merge_maxzoom",
+      "landcover: also merge overlapping polygons at max zoom", false);
+    this.toleranceZ11to13 = arguments.getDouble("landcover_tolerance_z11_13",
+      "landcover: pixel tolerance override for z11-13 (0 = leave default)", 0);
   }
 
   public static String getClassFromSubclass(String subclass) {
@@ -165,12 +187,24 @@ public class Landcover implements
           .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
 
           .setPixelToleranceFactor(2.5)
-          // default is 0.1, this helps reduce size of some heavy z7-10 tiles
-          .setPixelToleranceBelowZoom(10, 0.25)
+          // default is 0.1, this helps reduce size of some heavy z7-10 tiles.
+          // setPixelToleranceBelowZoom replaces all previous overrides, so z11-13 has to go in the
+          // same ZoomFunction rather than a second call.
+          // NOTE: must be a block lambda returning Double. A ternary chain mixing a double literal
+          // with null gets numeric-promoted and unboxes the null branch -> NPE per feature.
+          .setPixelToleranceOverrides((int zoom) -> {
+            if (zoom <= 10) {
+              return Double.valueOf(0.25);
+            }
+            if (toleranceZ11to13 > 0 && zoom <= 13) {
+              return Double.valueOf(toleranceZ11to13);
+            }
+            return null;
+          })
           .setMinPixelSizeFactor(1.8)
           .setAttr(Fields.CLASS, clazz)
-          .setAttr(Fields.SUBCLASS, subclazz)
-          // .setAttr(Fields.SUBCLASS, clazz.equals(subclazz) ? null : subclazz)
+          // subclass repeats class for most features - only worth emitting when it adds something
+          .setAttr(Fields.SUBCLASS, dropRedundantSubclass && clazz.equals(subclazz) ? null : subclazz)
           .setNumPointsAttr(TEMP_NUM_POINTS_ATTR)
           .setMinZoom(getMinZoomForArea(area, subclazz));
       }
@@ -194,12 +228,13 @@ public class Landcover implements
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) throws GeometryException {
-    if (zoom < 7 || zoom > 13) {
+    int maxMergeZoom = mergeMaxZoom ? 14 : 13;
+    if (zoom < 7 || zoom > maxMergeZoom) {
       for (var item : items) {
         item.tags().remove(TEMP_NUM_POINTS_ATTR);
       }
       return items;
-    } else { // z7-13
+    } else { // z7-13, or z7-14 with landcover_merge_maxzoom
       // merging only merges polygons with the same attributes, so use this temporary key
       // to separate features into layers that will be merged separately
       String tempGroupKey = "_group";
@@ -208,7 +243,9 @@ public class Landcover implements
       for (var item : items) {
         Map<String, Object> attrs = item.attrs();
         Object numPointsObj = attrs.remove(TEMP_NUM_POINTS_ATTR);
-        Object subclassObj = attrs.get(Fields.SUBCLASS);
+        // with landcover_drop_redundant_subclass the subclass attr is absent whenever it equalled
+        // class, so fall back to class here - otherwise wood/grass stops being merged entirely
+        Object subclassObj = coalesce(attrs.get(Fields.SUBCLASS), attrs.get(Fields.CLASS));
         if (numPointsObj instanceof Number num && subclassObj instanceof String subclass) {
           long numPoints = num.longValue();
           // if (zoom >= 10) {

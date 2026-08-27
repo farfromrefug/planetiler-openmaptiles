@@ -42,7 +42,9 @@ import com.onthegomap.planetiler.util.LanguageUtils;
 import com.onthegomap.planetiler.util.Translations;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Stream;
+import com.onthegomap.planetiler.config.PlanetilerConfig;
 
 /**
  * Utilities to extract common name fields (name, name_en, name_de, name:latin, name:nonlatin, name_int) that the
@@ -52,6 +54,22 @@ import java.util.stream.Stream;
  * <a href="https://github.com/openmaptiles/openmaptiles-tools/blob/master/sql/zzz_language.sql">openmaptiles-tools</a>.
  */
 public class OmtLanguageUtils {
+  /**
+   * When set, name_int is omitted whenever it would be an exact copy of name - otherwise every named
+   * feature pays for a second tag pointing at the same string.
+   * <p>
+   * Static because getNames is static and called from every layer; there is no instance to hang it
+   * on. {@link #configure(PlanetilerConfig)} is called once from the OpenMapTilesProfile constructor,
+   * before any layer is built. Defaults to false, so output is unchanged unless asked for.
+   */
+  private static volatile boolean dropRedundantNameInt = false;
+
+  /** Reads name_int behaviour from the run's arguments. Called once at profile construction. */
+  public static void configure(PlanetilerConfig config) {
+    dropRedundantNameInt = config.arguments().getBoolean("drop_redundant_name_int",
+      "omit name_int when it is an exact copy of name", false);
+  }
+
   /**
    * Returns a map with default name attributes (name, name_en, name_de, name:latin, name:nonlatin, name_int) that every
    * element should have, derived from name, int_name, name:en, and name:de tags on the input element.
@@ -100,12 +118,15 @@ public class OmtLanguageUtils {
     // putIfNotEmpty(result, "name_de", coalesce(nameDe, name, nameEn));
     // putIfNotEmpty(result, "name:latin", latin);
     // putIfNotEmpty(result, "name:nonlatin", nonLatin);
-    putIfNotEmpty(result, "name_int", coalesce(
-       intName,
-       nameEn,
-       latin
+    String nameInt = coalesce(
+      intName,
+      nameEn,
+      latin
     //   name
-     ));
+    );
+    if (!dropRedundantNameInt || !Objects.equals(nameInt, name)) {
+      putIfNotEmpty(result, "name_int", nameInt);
+    }
 
     if (translations != null) {
       translations.addTranslations(result, tags);

@@ -24,6 +24,7 @@ import org.openmaptiles.generated.OpenMapTilesSchema;
 import org.openmaptiles.generated.Tables;
 import org.openmaptiles.layers.Transportation;
 import org.openmaptiles.layers.TransportationName;
+import org.openmaptiles.util.OmtLanguageUtils;
 
 /**
  * Delegates the logic for generating a map to individual implementations in the {@code layers} package.
@@ -62,6 +63,10 @@ public class OpenMapTilesProfile extends ForwardingProfile {
 
   public OpenMapTilesProfile(Translations translations, PlanetilerConfig config, Stats stats) {
     super(config);
+
+    // getNames is static and shared by every layer, so its options are read once here rather than
+    // threaded through each layer constructor
+    OmtLanguageUtils.configure(config);
 
     // register release/finish/feature postprocessor/osm relationship handler methods...
     List<Handler> layers = new ArrayList<>();
