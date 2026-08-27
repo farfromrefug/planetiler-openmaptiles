@@ -229,6 +229,21 @@ public class Waterway implements
         config.tolerance(zoom),
         BUFFER_SIZE
       );
+    } else if (zoom >= 12) {
+      // OSM waterways arrive as many short ways -- streams average around 8 coordinates per
+      // feature -- and every fragment repeats the whole attribute set. Joining touching segments
+      // that already share their attributes removes that per-feature overhead without changing
+      // what gets drawn.
+      //
+      // Length limit is 0: unlike the lower zooms, nothing should be dropped here. resimplify is
+      // left at its default of false so the geometry stays exactly as setPixelToleranceFactor(0.5)
+      // produced it.
+      return FeatureMerge.mergeLineStrings(
+        items,
+        0,
+        config.tolerance(zoom),
+        BUFFER_SIZE
+      );
     }
     return items;
   }
