@@ -142,7 +142,6 @@ public class Park implements
         // .setAttr(Fields.SUBCLASS, nullIfEmpty(protectionTitle))
         .setMinPixelSize(2)
         .setSimplifyMethod(SimplifyMethod.VISVALINGAM_WHYATT)
-        .setPixelToleranceFactor(2.5)
         .setMinZoom(minzoom);
       // park name label point (if it has one)
       if (element.name() != null) {

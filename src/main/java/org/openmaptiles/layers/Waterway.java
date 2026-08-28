@@ -197,7 +197,6 @@ public class Waterway implements
       .setAttr(Fields.CLASS, element.waterway())
       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
       .setMinZoom(minzoom)
-      .setPixelToleranceFactor(0.5)
       // details only at higher zoom levels so that named rivers can be merged more aggressively
       .setAttrWithMinzoom(Fields.BRUNNEL, Utils.brunnel(element.isBridge(), element.isTunnel()), 12)
       .setAttrWithMinzoom(Fields.INTERMITTENT, element.isIntermittent() ? 1 : null, 12)
@@ -236,8 +235,8 @@ public class Waterway implements
       // what gets drawn.
       //
       // Length limit is 0: unlike the lower zooms, nothing should be dropped here. resimplify is
-      // left at its default of false so the geometry stays exactly as setPixelToleranceFactor(0.5)
-      // produced it.
+      // left at its default of false so the geometry is passed through untouched - merging joins
+      // segments, it does not reshape them.
       return FeatureMerge.mergeLineStrings(
         items,
         0,
