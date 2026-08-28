@@ -193,6 +193,11 @@ public class Transportation implements
   private PreparedGeometry greatBritain = null;
   private PreparedGeometry ireland = null;
 
+  /** Emit the surface_detail attribute; see {@link #surfaceDetail(String)}. */
+  private final boolean surfaceDetail;
+  /** Lowest zoom carrying surface_detail. Defaults to 14, where the cost is worth paying. */
+  private final int surfaceDetailMinzoom;
+
   public Transportation(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
     this.stats = stats;
@@ -200,6 +205,16 @@ public class Transportation implements
       "transportation_z13_paths",
       "transportation(_name) layer: show all paths on z13",
       false
+    );
+    surfaceDetail = config.arguments().getBoolean(
+      "transportation_surface_detail",
+      "transportation layer: emit surface_detail, the raw OSM surface value or tracktype grade",
+      false
+    );
+    surfaceDetailMinzoom = config.arguments().getInteger(
+      "transportation_surface_detail_minzoom",
+      "transportation layer: lowest zoom carrying surface_detail",
+      14
     );
     MINZOOMS = Map.ofEntries(
       entry(FieldValues.CLASS_PATH, z13Paths ? 13 : 14),
@@ -222,6 +237,23 @@ public class Transportation implements
       return value == null ? null : SURFACE_PAVED_VALUES.contains(value) ? FieldValues.SURFACE_PAVED : null;
     }
     return null;
+  }
+
+  /**
+   * Returns OSM's surface value verbatim, or the tracktype grade when surface is absent.
+   * <p>
+   * Deliberately unbucketed. An earlier version collapsed the 131 raw values into ten, which saved
+   * 471 KB on a rhone-alpes build and cost more than it saved: grade1-grade5 disappeared into
+   * compacted/gravel/ground, and track coverage dropped from 72.9% to 64.8% because values with no
+   * bucket were silently discarded. On a forest track the tracktype grade is often the only tag
+   * there is, and grade4 versus grade5 decides whether you ride or push.
+   * <p>
+   * Bucketing also saves less than it looks like it should: a tile stores each distinct string once
+   * in its value dictionary and every feature holds only a varint index into it, so the number of
+   * distinct values barely affects the per-feature cost.
+   */
+  private String surfaceDetail(String value) {
+    return surfaceDetail ? value : null;
   }
 
   /** Returns a value for {@code access} tag constrained to a small set of known values from raw OSM data. */
@@ -562,6 +594,8 @@ public class Transportation implements
             nullIfEmpty(element.construction()) != null ? 1 : null),
           12)
         .setAttrWithMinzoom(Fields.SURFACE, surface(highwayClass,coalesce(element.surface(), element.tracktype())), 12)
+        .setAttrWithMinzoom("surface_detail",
+          surfaceDetail(coalesce(element.surface(), element.tracktype())), surfaceDetailMinzoom)
         .setMinPixelSize(0) // merge during post-processing, then limit by size
 
         // .setPixelTolerance(0)
