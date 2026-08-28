@@ -61,11 +61,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.DecimalFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.DoubleAccumulator;
 import java.util.function.Consumer;
 import org.locationtech.jts.geom.Envelope;
 import org.slf4j.Logger;
@@ -80,13 +85,41 @@ public class Route implements
     OpenMapTilesProfile.OsmAllProcessor,
     ForwardingProfile.FinishHandler {
 
-    class RouteRelationData {
-        Double computedDistance = 0.0;
-        Envelope envelope = new Envelope();
-        long id;
+    /**
+     * Per-relation totals accumulated across every way of a route, from the multi-threaded OSM
+     * processing pool.
+     * <p>
+     * Both fields are written concurrently, so both have to be thread-safe, and both have to be
+     * order-independent or the result changes run to run. The distance is therefore accumulated as a
+     * long in millimetres rather than a double: integer addition is associative, floating-point
+     * addition is not. The envelope is tracked as four min/max accumulators, which are commutative.
+     */
+    static class RouteRelationData {
+        /** Route length in millimetres; see computedDistanceMeters(). */
+        final AtomicLong computedDistanceMm = new AtomicLong();
+        private final DoubleAccumulator minX = new DoubleAccumulator(Math::min, Double.POSITIVE_INFINITY);
+        private final DoubleAccumulator minY = new DoubleAccumulator(Math::min, Double.POSITIVE_INFINITY);
+        private final DoubleAccumulator maxX = new DoubleAccumulator(Math::max, Double.NEGATIVE_INFINITY);
+        private final DoubleAccumulator maxY = new DoubleAccumulator(Math::max, Double.NEGATIVE_INFINITY);
 
-        RouteRelationData(
-        ) {}
+        void expandToInclude(Envelope e) {
+            minX.accumulate(e.getMinX());
+            minY.accumulate(e.getMinY());
+            maxX.accumulate(e.getMaxX());
+            maxY.accumulate(e.getMaxY());
+        }
+
+        boolean hasEnvelope() {
+            return minX.get() <= maxX.get();
+        }
+
+        Envelope envelope() {
+            return new Envelope(minX.get(), maxX.get(), minY.get(), maxY.get());
+        }
+
+        double computedDistanceMeters() {
+            return computedDistanceMm.get() / 1000.0;
+        }
     }
     /*
      * Generates the shape for roads, trails, ferries, railways with detailed
@@ -98,7 +131,12 @@ public class Route implements
 
     private final Stats stats;
     private final PlanetilerConfig config;
-    private final HashMap<Long, RouteRelationData> routeRelationDatas = new HashMap<>();
+    /**
+     * Concurrent because processAllOsm runs on the OSM processing pool. The previous plain HashMap
+     * with a containsKey/put check-then-act lost updates under contention, which is why route
+     * distances came out short and varied between runs.
+     */
+    private final ConcurrentHashMap<Long, RouteRelationData> routeRelationDatas = new ConcurrentHashMap<>();
 
     /** Halve the merge tolerance so route geometry is simplified exactly like the transportation
      * layer - otherwise a route drawn over its own track visibly diverges as you zoom. */
@@ -109,8 +147,18 @@ public class Route implements
      * a sidecar json so it can be stored once in the archive instead of once per tile. */
     private final boolean symbolIds;
     private final Path symbolTablePath;
-    private final ConcurrentHashMap<String, Integer> symbolRegistry = new ConcurrentHashMap<>();
-    private final AtomicInteger nextSymbolId = new AtomicInteger();
+    /**
+     * Every osmc:symbol seen in OSM pass 1, which visits the same route relations pass 2 later emits
+     * features for. Collecting here rather than numbering on first use is what makes the ids
+     * reproducible: handing them out as features arrive makes the mapping depend on which processing
+     * thread got there first, so two runs of identical code disagree.
+     */
+    private final Set<String> symbolsSeen = ConcurrentHashMap.newKeySet();
+    /** symbol -> id, assigned once from the sorted contents of {@link #symbolsSeen}. */
+    private volatile Map<String, Integer> symbolIdsBySymbol;
+    /** Anything asked for that pass 1 never registered. Should stay empty; see {@link #symbolAttr}. */
+    private final ConcurrentHashMap<String, Integer> symbolOverflow = new ConcurrentHashMap<>();
+    private final AtomicInteger nextOverflowId = new AtomicInteger();
 
     public Route(Translations translations, PlanetilerConfig config, Stats stats) {
         this.config = config;
@@ -128,24 +176,64 @@ public class Route implements
     }
 
     /**
-     * Stable dense id per distinct symbol string.
-     * <p>
-     * The counter is an AtomicInteger rather than symbolRegistry.size(). This runs on the OSM
-     * processing pool, and reading the map's own size() inside computeIfAbsent lets two threads
-     * inserting into different bins both observe the same size and hand out the same id.
+     * Numbers every symbol pass 1 registered, in sorted order, so the same input always produces the
+     * same table. Built once, lazily, on the first request from pass 2 - by which point pass 1 has
+     * finished and {@link #symbolsSeen} is complete.
      */
-    private int symbolId(String symbol) {
-        return symbolRegistry.computeIfAbsent(symbol, s -> nextSymbolId.incrementAndGet());
+    private Map<String, Integer> symbolIdsBySymbol() {
+        var map = symbolIdsBySymbol;
+        if (map == null) {
+            synchronized (this) {
+                map = symbolIdsBySymbol;
+                if (map == null) {
+                    var sorted = new ArrayList<>(symbolsSeen);
+                    Collections.sort(sorted);
+                    var assigned = HashMap.<String, Integer>newHashMap(sorted.size());
+                    for (int i = 0; i < sorted.size(); i++) {
+                        assigned.put(sorted.get(i), i + 1);
+                    }
+                    symbolIdsBySymbol = map = assigned;
+                }
+            }
+        }
+        return map;
+    }
+
+    /**
+     * The value to store in the "symbol" attribute: an integer id when symbolIds is on, otherwise the
+     * string itself.
+     * <p>
+     * A symbol missing from the pass 1 set would mean the two passes disagree about which relations
+     * carry symbols. That should not happen, so it is logged; the raw string is emitted rather than
+     * dropping the attribute, because a route must never lose content. Note an overflow id makes the
+     * run non-reproducible again, which is the point of the warning.
+     */
+    private Object symbolAttr(String symbol) {
+        if (symbol == null) {
+            return null;
+        }
+        if (!symbolIds) {
+            return symbol;
+        }
+        Integer id = symbolIdsBySymbol().get(symbol);
+        if (id == null) {
+            id = symbolOverflow.computeIfAbsent(symbol, s -> {
+                LOGGER.warn("route symbol not registered in pass 1, ids are no longer reproducible: {}", s);
+                return symbolIdsBySymbol().size() + nextOverflowId.incrementAndGet();
+            });
+        }
+        return id;
     }
 
     @Override
     public void finish(String sourceName, FeatureCollector.Factory featureCollectors,
         Consumer<FeatureCollector.Feature> next) {
-        if (!symbolIds || !"osm".equals(sourceName) || symbolRegistry.isEmpty()) {
+        if (!symbolIds || !"osm".equals(sourceName) || symbolsSeen.isEmpty()) {
             return;
         }
         var byId = new TreeMap<Integer, String>();
-        symbolRegistry.forEach((symbol, id) -> byId.put(id, symbol));
+        symbolIdsBySymbol().forEach((symbol, id) -> byId.put(id, symbol));
+        symbolOverflow.forEach((symbol, id) -> byId.put(id, symbol));
         var json = new StringBuilder("{");
         for (var entry : byId.entrySet()) {
             if (json.length() > 1) {
@@ -181,6 +269,11 @@ public class Route implements
             String name =
                 coalesce(nullIfEmpty(relation.getString("name")), nullIfEmpty(relation.getString("alt_name")));
             String ref = coalesce(nullIfEmpty(relation.getString("ref")), nullIfEmpty(relation.getString("osmc:ref")));
+            // register here, in pass 1, so ids can be assigned from the complete sorted set later
+            String symbol = nullIfEmpty(relation.getString("osmc:symbol"));
+            if (symbolIds && symbol != null) {
+                symbolsSeen.add(symbol);
+            }
             return List.of(new RouteRelation(
                 type,
                 name,
@@ -190,7 +283,7 @@ public class Route implements
                 Parse.meters(relation.getString("ascent")),
                 Parse.meters(relation.getString("descent")),
                 Parse.meters(relation.getString("distance")),
-                relation.getString("osmc:symbol"),
+                symbol,
                 relation.id()));
         }
         return null;
@@ -202,19 +295,14 @@ public class Route implements
         if (relations != null && !relations.isEmpty() && feature.canBeLine()) {
             for (var relation : relations) {
                 long relId = relation.id();
-                RouteRelationData routeRelationData;
-                if (!routeRelationDatas.containsKey(relId)) {
-                    routeRelationData = new RouteRelationData();
-                    routeRelationDatas.put(relId, routeRelationData);
-                } else {
-                    routeRelationData = routeRelationDatas.get(relId);
-
-                }
+                RouteRelationData routeRelationData =
+                    routeRelationDatas.computeIfAbsent(relId, id -> new RouteRelationData());
                 try {
                     if (relation.distance == null) {
-                        routeRelationData.computedDistance += feature.length() * 40075 / 2.0;
+                        routeRelationData.computedDistanceMm
+                            .addAndGet(Math.round(feature.length() * 40075 / 2.0 * 1000.0));
                     }
-                    routeRelationData.envelope.expandToInclude(feature.worldGeometry().getEnvelopeInternal());
+                    routeRelationData.expandToInclude(feature.worldGeometry().getEnvelopeInternal());
                 } catch (GeometryException e) {
                     e.log(stats, "route_decode", "Unable to get route length for " + feature.id());
                 }
@@ -244,7 +332,7 @@ public class Route implements
                         relation.distance() != null ? nullIfLong(Math.round(relation.distance()), 0) : null)
                     // symbolIds swaps the string for an integer id plus a sidecar lookup - the same
                     // information, stored once per archive instead of once per tile
-                    .setAttr("symbol", symbol == null ? null : symbolIds ? symbolId(symbol) : symbol)
+                    .setAttr("symbol", symbolAttr(symbol))
                     .setAttr("name", name);
             }
         }
@@ -358,8 +446,8 @@ public class Route implements
             var attrs = items.get(i).attrs();
             Long relId = (Long) attrs.get("osmid");
             var routeRelationData = routeRelationDatas.get(relId);
-            if (routeRelationData != null) {
-                var latLngBounds = GeoUtils.toLatLonBoundsBounds(routeRelationData.envelope);
+            if (routeRelationData != null && routeRelationData.hasEnvelope()) {
+                var latLngBounds = GeoUtils.toLatLonBoundsBounds(routeRelationData.envelope());
                 DecimalFormat df =
                     new DecimalFormat(extentDigits <= 0 ? "#" : "#." + "0".repeat(extentDigits));
                 String extent = df.format(latLngBounds.getMinX()) + "," +
@@ -367,7 +455,7 @@ public class Route implements
                     "," + df.format(latLngBounds.getMaxY());
                 attrs.put("extent", extent);
                 if (attrs.get("distance") == null) {
-                    attrs.put("distance", nullIfLong(Math.round(routeRelationData.computedDistance), 0));
+                    attrs.put("distance", nullIfLong(Math.round(routeRelationData.computedDistanceMeters()), 0));
                 }
             }
         }
