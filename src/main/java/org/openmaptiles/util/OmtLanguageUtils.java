@@ -64,10 +64,39 @@ public class OmtLanguageUtils {
    */
   private static volatile boolean dropRedundantNameInt = false;
 
-  /** Reads name_int behaviour from the run's arguments. Called once at profile construction. */
+  /**
+   * When set, a name tag is omitted whenever another name tag on the same feature already carries
+   * the identical string.
+   * <p>
+   * With {@code --languages=fr,en} a French feature that also has {@code name:en} comes out as four
+   * tags holding two distinct strings:
+   *
+   * <pre>
+   * name     = Parc naturel régional de Chartreuse
+   * name:fr  = Parc naturel régional de Chartreuse
+   * name:en  = Chartreuse Regional Nature Park
+   * name_int = Chartreuse Regional Nature Park
+   * </pre>
+   *
+   * This drops {@code name:fr} and {@code name_int}, leaving both strings reachable exactly once.
+   * <p>
+   * <b>This is only safe for a client whose fallback reaches {@code name} before {@code name_int}</b>
+   * - {@code name:<lang>} then {@code name} then {@code name_int}. Under the opposite order a
+   * French reader whose {@code name:fr} was dropped as a duplicate lands on the English
+   * {@code name_int} instead of the local name, which is worse than the duplication.
+   * <p>
+   * The saving is small: on a rhone-alpes basemap only about 2.7% of named features carry any
+   * translation at all. This is for a coherent set of name tags, not for tile size.
+   */
+  private static volatile boolean dropDuplicateNames = false;
+
+  /** Reads name behaviour from the run's arguments. Called once at profile construction. */
   public static void configure(PlanetilerConfig config) {
     dropRedundantNameInt = config.arguments().getBoolean("drop_redundant_name_int",
       "omit name_int when it is an exact copy of name", false);
+    dropDuplicateNames = config.arguments().getBoolean("drop_duplicate_names",
+      "omit a name:<lang> that copies name, and name_int when another name tag already carries it",
+      false);
   }
 
   /**
@@ -124,15 +153,30 @@ public class OmtLanguageUtils {
       latin
     //   name
     );
-    if (!dropRedundantNameInt || !Objects.equals(nameInt, name)) {
-      putIfNotEmpty(result, "name_int", nameInt);
-    }
 
+    // translations first, and name_int last: whether name_int is redundant depends on which
+    // name:<lang> tags actually survive, and dropping a translation can be what makes name_int
+    // the only copy of that string left
     if (translations != null) {
       translations.addTranslations(result, tags);
     }
+    if (dropDuplicateNames) {
+      result.entrySet()
+        .removeIf(entry -> entry.getKey().startsWith("name:") && Objects.equals(entry.getValue(), name));
+    }
+
+    boolean redundant = (dropRedundantNameInt && Objects.equals(nameInt, name)) ||
+      (dropDuplicateNames && alreadyCarried(result, nameInt));
+    if (!redundant) {
+      putIfNotEmpty(result, "name_int", nameInt);
+    }
 
     return result;
+  }
+
+  /** Whether some name tag already emitted for this feature holds {@code value}. */
+  private static boolean alreadyCarried(Map<String, Object> names, String value) {
+    return value != null && names.values().stream().anyMatch(held -> Objects.equals(held, value));
   }
 
   public static String string(Object obj) {
