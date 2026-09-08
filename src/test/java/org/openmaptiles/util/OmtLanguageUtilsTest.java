@@ -6,10 +6,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.onthegomap.planetiler.config.Arguments;
+import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.util.Translations;
 import com.onthegomap.planetiler.util.Wikidata;
 import java.util.List;
 import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -20,6 +25,72 @@ class OmtLanguageUtilsTest {
   private final Wikidata.WikidataTranslations wikidataTranslations = new Wikidata.WikidataTranslations();
   private final Translations translations = Translations.defaultProvider(List.of("en", "es", "de"))
     .addFallbackTranslationProvider(wikidataTranslations);
+
+  /// The name flags are static, so a test that sets one has to put it back or every later test
+  /// in the run inherits it.
+  @AfterEach
+  void resetNameFlags() {
+    configure(Map.of());
+  }
+
+  private static void configure(Map<String, String> args) {
+    OmtLanguageUtils.configure(PlanetilerConfig.from(Arguments.of(args)));
+  }
+
+  /** The tags on a French feature that also carries an English name - the shape this is about. */
+  private static final Map<String, Object> CHARTREUSE = Map.of(
+    "name", "Parc naturel régional de Chartreuse",
+    "name:fr", "Parc naturel régional de Chartreuse",
+    "name:en", "Chartreuse Regional Nature Park"
+  );
+
+  @Test
+  void duplicateNamesAreKeptByDefault() {
+    var names = OmtLanguageUtils.getNames(CHARTREUSE, Translations.defaultProvider(List.of("fr", "en")));
+    assertEquals("Parc naturel régional de Chartreuse", names.get("name:fr"));
+    assertEquals("Chartreuse Regional Nature Park", names.get("name_int"));
+  }
+
+  /// Four tags holding two distinct strings become two tags holding two distinct strings, and
+  /// nothing that was reachable stops being reachable.
+  @Test
+  void dropDuplicateNamesRemovesTheCopiesAndKeepsBothStrings() {
+    configure(Map.of("drop_duplicate_names", "true"));
+    var names = OmtLanguageUtils.getNames(CHARTREUSE, Translations.defaultProvider(List.of("fr", "en")));
+
+    assertNull(names.get("name:fr"), "an exact copy of name");
+    assertNull(names.get("name_int"), "an exact copy of name:en");
+    assertEquals("Parc naturel régional de Chartreuse", names.get("name"));
+    assertEquals("Chartreuse Regional Nature Park", names.get("name:en"));
+  }
+
+  /// The reason name_int is decided after the translations: with English not among the emitted
+  /// languages, name_int is the only copy of the English name left, and dropping it would lose
+  /// the string rather than deduplicate it.
+  @Test
+  void nameIntSurvivesWhenNoTranslationCarriesIt() {
+    configure(Map.of("drop_duplicate_names", "true"));
+    var names = OmtLanguageUtils.getNames(CHARTREUSE, Translations.defaultProvider(List.of("fr")));
+
+    assertNull(names.get("name:fr"), "still an exact copy of name");
+    assertEquals("Chartreuse Regional Nature Park", names.get("name_int"));
+  }
+
+  /// The older, narrower flag is untouched: it compares against name only, so the English
+  /// name_int here is not redundant to it.
+  @Test
+  void dropRedundantNameIntStillOnlyComparesAgainstName() {
+    configure(Map.of("drop_redundant_name_int", "true"));
+    var names = OmtLanguageUtils.getNames(CHARTREUSE, Translations.defaultProvider(List.of("fr", "en")));
+    assertEquals("Chartreuse Regional Nature Park", names.get("name_int"));
+    assertEquals("Parc naturel régional de Chartreuse", names.get("name:fr"));
+
+    // and it does drop the case it is for: no name:en, so name_int would repeat name
+    var french = OmtLanguageUtils.getNames(Map.of("name", "Le Rhône"),
+      Translations.defaultProvider(List.of("fr")));
+    assertNull(french.get("name_int"));
+    assertTrue(french.containsKey("name"));
+  }
 
   @Test
   void testSimpleExample() {
