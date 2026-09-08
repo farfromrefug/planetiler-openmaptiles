@@ -580,7 +580,7 @@ public class Transportation implements
         .setAttrWithMinzoom("sac_scale", nullIfInt(translateSacScale(element.sacScale()), -1), 8)
         .setAttrWithMinzoom("tracktype",
           nullIfInt(translateTrackType((String) element.source().getTag("tracktype")), -1), 9)
-        .setAttrWithMinzoom(Fields.ACCESS, "yes".equals(element.access()) ? 1 : null, 9)
+        .setAttrWithMinzoom(Fields.ACCESS, access(element.access()), 9)
         .setAttrWithMinzoom(Fields.TOLL, element.toll() ? 1 : null, 9)
         // sometimes z9+, sometimes z12+
         .setAttr(Fields.RAMP, minzoom >= 12 ? rampAboveZ12 :
