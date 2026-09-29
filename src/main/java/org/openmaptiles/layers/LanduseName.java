@@ -88,7 +88,6 @@ public class LanduseName implements
           clazz.equals("industrial") ||
           clazz.equals("retail") ||
           clazz.equals("track") ||
-          clazz.equals("playground") ||
           clazz.equals("dam")) &&
         element.source().hasTag("name")) {
 

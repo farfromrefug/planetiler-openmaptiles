@@ -894,7 +894,7 @@ public class Tables {
         "escape_game", "fitness_centre", "golf_course", "ice_rink", "hackerspace", "marina",
         "miniature_golf", "park", "pitch", "sports_centre", "sports_hall", "stadium", "swimming_area",
         "trampoline_park",
-        "water_park", "dog_park"),
+        "water_park", "dog_park", "playground"),
       matchAny("office", "accountant", "advertising_agency", "architect", "association", "bail_bond_agent", "charity",
         "company", "construction_company", "consulting", "cooperative", "courier", "coworking", "diplomatic",
         "educational_institution", "employment_agency", "energy_supplier", "engineer", "estate_agent", "financial",

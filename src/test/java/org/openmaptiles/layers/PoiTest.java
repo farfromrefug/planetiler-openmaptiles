@@ -69,6 +69,23 @@ class PoiTest extends AbstractLayerTest {
     ))));
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void testUnnamedPlayground(boolean area) {
+    // a playground mapped as an area had no POI at all when it was unnamed; its landuse is not under test
+    List<FeatureCollector.Feature> pois = new ArrayList<>();
+    process(feature(area, Map.of("leisure", "playground"))).forEach(f -> {
+      if ("poi".equals(f.getLayer())) {
+        pois.add(f);
+      }
+    });
+    assertFeatures(14, List.of(Map.of(
+      "_layer", "poi",
+      "class", "playground",
+      "subclass", "<null>"
+    )), pois);
+  }
+
   private List<FeatureCollector.Feature> testAggStops(List<SourceFeature> sourceFeatures) {
     sourceFeatures.forEach(this::process);
 
