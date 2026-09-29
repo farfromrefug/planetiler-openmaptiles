@@ -79,7 +79,7 @@ import java.util.Set;
  */
 public class TransportationName implements
     OpenMapTilesSchema.TransportationName,
-    // Tables.OsmHighwayPoint.Handler,
+    Tables.OsmHighwayPoint.Handler,
     Tables.OsmHighwayLinestring.Handler,
     Tables.OsmAerialwayLinestring.Handler,
     // Tables.OsmShipwayLinestring.Handler,
@@ -187,30 +187,26 @@ public class TransportationName implements
     }
   }
 
-  // @Override
-  // public void process(Tables.OsmHighwayPoint element, FeatureCollector
-  // features) {
-  // long id = element.source().id();
-  // byte value = motorwayJunctionHighwayClasses.getOrDefault(id, (byte) -1);
-  // if (value > 0) {
-  // HighwayClass cls = HighwayClass.from(value);
-  // if (cls != HighwayClass.UNKNOWN) {
-  // String subclass = FieldValues.SUBCLASS_JUNCTION;
-  // String ref = element.ref();
-
-  //       features.point(LAYER_NAME)
-  //         .setBufferPixels(BUFFER_SIZE)
-  //         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-  //         .setAttr(Fields.REF, ref)
-  //         .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
-  //         .setAttr(Fields.CLASS, highwayClass(cls.highwayValue, null, null, null))
-  //         .setAttr(Fields.SUBCLASS, subclass)
-  //         .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
-  //         .setSortKeyDescending(element.zOrder())
-  //         .setMinZoom(10);
-  //     }
-  //   }
-  // }
+  @Override
+  public void process(Tables.OsmHighwayPoint element, FeatureCollector features) {
+    long id = element.source().id();
+    byte value = motorwayJunctionHighwayClasses.getOrDefault(id, (byte) -1);
+    if (value > 0) {
+      HighwayClass cls = HighwayClass.from(value);
+      if (cls != HighwayClass.UNKNOWN) {
+        String ref = element.ref();
+        features.point(LAYER_NAME)
+          .setBufferPixels(BUFFER_SIZE)
+          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+          .setAttr(Fields.REF, ref)
+          .setAttr(Fields.CLASS, highwayClass(cls.highwayValue, null, null, null))
+          .setAttr(Fields.SUBCLASS, FieldValues.SUBCLASS_JUNCTION)
+          .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
+          .setSortKeyDescending(element.zOrder())
+          .setMinZoom(10);
+      }
+    }
+  }
 
   @Override
   public void process(Tables.OsmHighwayLinestring element, FeatureCollector features) {
@@ -221,7 +217,8 @@ public class TransportationName implements
         .findFirst()
         .orElse(null);
 
-    if (firstRelationWithNetwork != null && !nullOrEmpty(firstRelationWithNetwork.ref())) {
+    // the way's own ref wins: a French A 41 is also the E 712, and its plate says A 41
+    if (nullOrEmpty(ref) && firstRelationWithNetwork != null && !nullOrEmpty(firstRelationWithNetwork.ref())) {
       ref = firstRelationWithNetwork.ref();
     }
 
@@ -237,6 +234,19 @@ public class TransportationName implements
 
     String name = nullIfEmpty(element.name());
     ref = nullIfEmpty(ref);
+    // the network of the relation the ref belongs to: OpenMapTiles' name where it has one
+    // (e-road, gb-motorway...), the raw OSM network otherwise (FR:A-road)
+    String network = null;
+    if (ref != null) {
+      String wanted = ref.replace(" ", "");
+      Transportation.RouteRelation owner = relations.stream()
+        .filter(r -> wanted.equals(coalesce(r.ref(), "").replace(" ", "")))
+        .findFirst()
+        .orElse(null);
+      if (owner != null) {
+        network = owner.networkType() != null ? owner.networkType().name : nullIfEmpty(owner.network());
+      }
+    }
     String highway = nullIfEmpty(element.highway());
 
     String highwayClass = highwayClass(element.highway(), null, element.construction(), element.manMade());
@@ -265,9 +275,9 @@ public class TransportationName implements
         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
         .setAttr(Fields.REF, ref)
         // .setAttr(Fields.REF_LENGTH, ref != null ? ref.length() : null)
-        // .setAttr(Fields.NETWORK,
-        // firstRelationWithNetwork != null ? firstRelationWithNetwork.networkType().name : !nullOrEmpty(ref) ? "road" :
-        //   null)
+        .setAttr(Fields.NETWORK, network)
+        // a shield's colours are per country; only a road with a ref draws one
+        .setAttr("iso_a2", ref != null ? transportation.isoA2(element) : null)
         .setAttr(Fields.CLASS, highwayClass)
         .setAttr(Fields.SUBCLASS, subclass)
         .setMinPixelSize(0)

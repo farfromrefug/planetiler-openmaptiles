@@ -53,6 +53,7 @@ import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.geo.PolygonIndex;
 import com.onthegomap.planetiler.geo.SimplifyMethod;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import com.onthegomap.planetiler.reader.osm.OsmElement;
@@ -191,6 +192,8 @@ public class Transportation implements
   private final Stats stats;
   private final PlanetilerConfig config;
   private PreparedGeometry greatBritain = null;
+  // Natural Earth countries, for the iso_a2 a road shield takes its colours from
+  private final PolygonIndex<String> countries = PolygonIndex.create();
   private PreparedGeometry ireland = null;
 
   /** Emit the surface_detail attribute; see {@link #surfaceDetail(String)}. */
@@ -370,6 +373,18 @@ public class Transportation implements
     if (!"ne_10m_admin_0_countries".equals(table)) {
       return;
     }
+    // Natural Earth writes -99 in iso_a2 for France and Norway (overseas territories); iso_a2_eh has them
+    String isoA2 = Objects.requireNonNullElse(feature.getString("iso_a2"), "-99");
+    if ("-99".equals(isoA2)) {
+      isoA2 = Objects.requireNonNullElse(feature.getString("iso_a2_eh"), "-99");
+    }
+    if (!"-99".equals(isoA2)) {
+      try {
+        countries.put(feature.worldGeometry(), isoA2);
+      } catch (GeometryException e) {
+        e.log(stats, "omt_transportation_country", "Unable to index Natural Earth country " + isoA2);
+      }
+    }
     // multiple threads call this method concurrently, GB (or IE) polygon *should* only be found
     // once, but just to be safe synchronize updates to that field
     if (feature.hasTag("iso_a2", "GB")) {
@@ -399,56 +414,71 @@ public class Transportation implements
 
   @Override
   public List<OsmRelationInfo> preprocessOsmRelation(OsmElement.Relation relation) {
-    // if (relation.hasTag("route", "road", "hiking")) {
-    //   RouteNetwork networkType = null;
-    //   String network = relation.getString("network");
-    //   String ref = relation.getString("ref");
-    //   String name = nullIfEmpty(relation.getString("name"));
-    //   String colour = coalesce(
-    //     nullIfEmpty(relation.getString("colour")), nullIfEmpty(relation.getString("ref:colour")));
+    // road relations only: hiking and cycling ones go to the separate route archive (Route.java)
+    if (relation.hasTag("route", "road")) {
+      RouteNetwork networkType = null;
+      String network = relation.getString("network");
+      String ref = relation.getString("ref");
+      String name = nullIfEmpty(relation.getString("name"));
+      String colour = coalesce(
+        nullIfEmpty(relation.getString("colour")), nullIfEmpty(relation.getString("ref:colour")));
 
-    //   if ("US:I".equals(network)) {
-    //     networkType = RouteNetwork.US_INTERSTATE;
-    //   } else if ("US:US".equals(network)) {
-    //     networkType = RouteNetwork.US_HIGHWAY;
-    //   } else if (network != null && network.length() == 5 && network.startsWith("US:")) {
-    //     networkType = RouteNetwork.US_STATE;
-    //   } else if (network != null && network.startsWith("CA:transcanada")) {
-    //     networkType = RouteNetwork.CA_TRANSCANADA;
-    //   } else if ("CA:QC:A".equals(network)) {
-    //     networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
-    //   } else if ("CA:ON:primary".equals(network)) {
-    //     if (ref != null && ref.length() == 3 && ref.startsWith("4")) {
-    //       networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
-    //     } else if ("QEW".equals(ref)) {
-    //       networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
-    //     } else {
-    //       networkType = RouteNetwork.CA_PROVINCIAL;
-    //     }
-    //   } else if ("CA:MB:PTH".equals(network) && "75".equals(ref)) {
-    //     networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
-    //   } else if ("CA:AB:primary".equals(network) && ref != null && CA_AB_PRIMARY_AS_ARTERIAL_BY_REF.contains(ref)) {
-    //     networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
-    //   } else if ("CA:BC".equals(network) && ref != null && CA_BC_AS_ARTERIAL_BY_REF.contains(ref)) {
-    //     networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
-    //   } else if (network != null && ((network.length() == 5 && network.startsWith("CA:")) ||
-    //     (network.length() >= 6 && network.startsWith("CA:") && network.charAt(5) == ':'))) {
-    //     // in SQL: LIKE 'CA:__' OR network LIKE 'CA:__:%'; but wanted to avoid regexp hence more ugly
-    //     networkType = RouteNetwork.CA_PROVINCIAL;
-    //   }
+      if ("US:I".equals(network)) {
+        networkType = RouteNetwork.US_INTERSTATE;
+      } else if ("US:US".equals(network)) {
+        networkType = RouteNetwork.US_HIGHWAY;
+      } else if (network != null && network.length() == 5 && network.startsWith("US:")) {
+        networkType = RouteNetwork.US_STATE;
+      } else if ("e-road".equals(network)) {
+        networkType = RouteNetwork.E_ROAD;
+      } else if ("AsianHighway".equals(network)) {
+        networkType = RouteNetwork.A_ROAD;
+      } else if (network != null && network.startsWith("CA:transcanada")) {
+        networkType = RouteNetwork.CA_TRANSCANADA;
+      } else if ("CA:QC:A".equals(network)) {
+        networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
+      } else if ("CA:ON:primary".equals(network)) {
+        if (ref != null && ref.length() == 3 && ref.startsWith("4")) {
+          networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
+        } else if ("QEW".equals(ref)) {
+          networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
+        } else {
+          networkType = RouteNetwork.CA_PROVINCIAL;
+        }
+      } else if ("CA:MB:PTH".equals(network) && "75".equals(ref)) {
+        networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
+      } else if ("CA:AB:primary".equals(network) && ref != null && CA_AB_PRIMARY_AS_ARTERIAL_BY_REF.contains(ref)) {
+        networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
+      } else if ("CA:BC".equals(network) && ref != null && CA_BC_AS_ARTERIAL_BY_REF.contains(ref)) {
+        networkType = RouteNetwork.CA_PROVINCIAL_ARTERIAL;
+      } else if (network != null && ((network.length() == 5 && network.startsWith("CA:")) ||
+        (network.length() >= 6 && network.startsWith("CA:") && network.charAt(5) == ':'))) {
+        // in SQL: LIKE 'CA:__' OR network LIKE 'CA:__:%'; but wanted to avoid regexp hence more ugly
+        networkType = RouteNetwork.CA_PROVINCIAL;
+      }
 
-    //   int rank = switch (coalesce(network, "")) {
-    //     case "iwn", "nwn", "rwn" -> 1;
-    //     case "lwn" -> 2;
-    //     default -> (relation.hasTag("osmc:symbol") || relation.hasTag("colour")) ? 2 : 3;
-    //   };
+      int rank = switch (coalesce(network, "")) {
+        case "iwn", "nwn", "rwn" -> 1;
+        case "lwn" -> 2;
+        default -> (relation.hasTag("osmc:symbol") || relation.hasTag("colour")) ? 2 : 3;
+      };
 
-    //   if (network != null || rank < 3) {
-    //     return List
-    //       .of(new RouteRelation(coalesce(ref, ""), network, name, colour, networkType, (byte) rank, relation.id()));
-    //   }
-    // }
+      if (network != null || rank < 3) {
+        return List
+          .of(new RouteRelation(coalesce(ref, ""), network, name, colour, networkType, (byte) rank, relation.id()));
+      }
+    }
     return null;
+  }
+
+  /** The ISO 3166-1 alpha-2 code of the country a road lies in, from Natural Earth; null offshore. */
+  String isoA2(Tables.OsmHighwayLinestring element) {
+    try {
+      return countries.getOnlyContaining(element.source().worldGeometry().getCentroid());
+    } catch (GeometryException e) {
+      e.log(stats, "omt_transportation_iso_a2", "Unable to locate the country of " + element.source().id());
+      return null;
+    }
   }
 
   List<RouteRelation> getRouteRelations(Tables.OsmHighwayLinestring element) {
@@ -574,8 +604,8 @@ public class Transportation implements
         .setAttrWithMinSize(Fields.LAYER, nullIfLong(element.layer(), 0), 4, 9, 12)
         .setAttrWithMinzoom(Fields.BICYCLE, "yes".equals(element.bicycle()) ? 1 : null, 9)
         .setAttrWithMinzoom(Fields.FOOT, "no".equals(element.foot()) ? 0 : null, 9)
-        // .setAttrWithMinzoom(Fields.HORSE, nullIfEmpty(element.horse()), 9)
-        // .setAttrWithMinzoom(Fields.MTB_SCALE, nullIfEmpty(element.mtbScale()), 9)
+        .setAttrWithMinzoom(Fields.HORSE, nullIfEmpty(element.horse()), 9)
+        .setAttrWithMinzoom(Fields.MTB_SCALE, nullIfEmpty(element.mtbScale()), 9)
         .setAttrWithMinzoom(Fields.OFFICIAL, official(highway, element.informal(), element.operator()), 9)
         .setAttrWithMinzoom("sac_scale", nullIfInt(translateSacScale(element.sacScale()), -1), 8)
         .setAttrWithMinzoom("tracktype",
