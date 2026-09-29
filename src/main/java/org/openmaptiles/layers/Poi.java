@@ -127,6 +127,7 @@ public class Poi implements
     entry("viewpoint", 1_001)
   );
   private static final Set<String> UNIVERSITY_POI_SUBCLASSES = Set.of("university", "college");
+  private static final Set<String> TRANSIT_CLASSES = Set.of("railway", "bus", "ferry", "aerialway");
   private static final List<String> AGG_STOP_SUBCLASS_ORDER = List.of(
     "subway",
     "tram_stop",
@@ -353,6 +354,15 @@ public class Poi implements
     if (names.isEmpty() && !nullOrEmpty(name)) {
       output.setAttr(Fields.NAME, name);
     }
+    // a bus shelter is named after its stop; a style leaves it unnamed where a mountain shelter keeps its name
+    if ("shelter".equals(poiClass)) {
+      output.setAttr("shelter_type", nullIfEmpty((String) element.source().getTag("shelter_type")));
+    }
+    // the operator's network (RATP, TAG...) picks a transit badge that class and subclass cannot name
+    if (TRANSIT_CLASSES.contains(poiClass)) {
+      output.setAttr("network", nullIfEmpty(element.network()));
+    }
+    output.setAttr(Fields.AGG_STOP, aggStop);
     if ("spring".equals(subclass)) {
       output.setAttr(Fields.RANK, 1);
     } else {
