@@ -82,7 +82,7 @@ public class TransportationName implements
     Tables.OsmHighwayPoint.Handler,
     Tables.OsmHighwayLinestring.Handler,
     Tables.OsmAerialwayLinestring.Handler,
-    // Tables.OsmShipwayLinestring.Handler,
+    Tables.OsmShipwayLinestring.Handler,
     ForwardingProfile.LayerPostProcessor,
     OpenMapTilesProfile.IgnoreWikidata,
     ForwardingProfile.OsmNodePreprocessor,
@@ -346,19 +346,19 @@ public class TransportationName implements
     }
   }
 
-  // @Override
-  // public void process(Tables.OsmShipwayLinestring element, FeatureCollector features) {
-  //   if (!nullOrEmpty(element.name())) {
-  //     features.line(LAYER_NAME)
-  //       .setBufferPixels(BUFFER_SIZE)
-  //       .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
-  //       .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-  //       .setAttr(Fields.CLASS, element.shipway())
-  //       .setMinPixelSize(0)
-  //       .setSortKey(element.zOrder())
-  //       .setMinZoom(12);
-  //   }
-  // }
+  @Override
+  public void process(Tables.OsmShipwayLinestring element, FeatureCollector features) {
+    if (!nullOrEmpty(element.name())) {
+      features.line(LAYER_NAME)
+        .setBufferPixels(BUFFER_SIZE)
+        .setBufferPixelOverrides(BUFFER_PIXEL_OVERRIDES)
+        .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+        .setAttr(Fields.CLASS, element.shipway())
+        .setMinPixelSize(0)
+        .setSortKey(element.zOrder())
+        .setMinZoom(12);
+    }
+  }
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
