@@ -3,10 +3,16 @@ package org.openmaptiles.layers;
 import static com.onthegomap.planetiler.TestUtils.newPoint;
 
 import com.onthegomap.planetiler.FeatureCollector;
+import com.onthegomap.planetiler.VectorTile;
+import com.onthegomap.planetiler.config.Arguments;
+import com.onthegomap.planetiler.config.PlanetilerConfig;
+import com.onthegomap.planetiler.geo.GeometryType;
+import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.geo.GeometryException;
 import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.reader.SourceFeature;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assertions;
@@ -465,4 +471,54 @@ class PoiTest extends AbstractLayerTest {
     ))));
   }
 
+  private OpenMapTilesProfile treesProfile() {
+    return new OpenMapTilesProfile(translations,
+      PlanetilerConfig.from(Arguments.of(Map.of("poi_trees", "true"))), Stats.inMemory());
+  }
+
+  @Test
+  void testTreesOffByDefault() {
+    assertFeatures(14, List.of(), process(pointFeature(Map.of("natural", "tree"))));
+  }
+
+  @Test
+  void testTree() {
+    var feature = pointFeature(Map.of("natural", "tree", "leaf_type", "broadleaved", "level", "0"));
+    var collector = featureCollectorFactory.get(feature);
+    treesProfile().processFeature(feature, collector);
+    assertFeatures(14, List.of(Map.of(
+      "_layer", "poi",
+      "class", "tree",
+      "subclass", "<null>",
+      "level", "<null>",
+      "_minzoom", 14
+    )), collector);
+  }
+
+  @Test
+  void testPacksUnnamedTrees() throws GeometryException {
+    var layer = Poi.LAYER_NAME;
+    var result = treesProfile().postProcessLayerFeatures(layer, 14, List.of(
+      treeAt(1, 1, Map.of("class", "tree")),
+      treeAt(1, 1, Map.of("class", "tree")),
+      treeAt(2, 3, Map.of("class", "tree")),
+      treeAt(4, 4, Map.of("class", "tree", "name", "Chêne de la Lune")),
+      treeAt(5, 5, Map.of("class", "toilets"))
+    ));
+    Assertions.assertEquals(3, result.size(), result::toString);
+    var packed = result.stream().filter(f -> f.geometry().geomType() == GeometryType.POINT &&
+      f.tags().equals(Map.of("class", "tree"))).toList();
+    Assertions.assertEquals(1, packed.size(), result::toString);
+    // the two trees at one spot draw as one
+    Assertions.assertEquals(2, packed.getFirst().geometry().decode().getNumPoints());
+    var named = result.stream().filter(f -> f.tags().containsKey("name")).findFirst().orElseThrow();
+    Assertions.assertFalse(named.tags().containsKey("rank"), "a tree has no rank");
+    var toilets = result.stream().filter(f -> "toilets".equals(f.tags().get("class"))).findFirst().orElseThrow();
+    Assertions.assertEquals(1, toilets.tags().get("rank"));
+  }
+
+  private VectorTile.Feature treeAt(double x, double y, Map<String, Object> tags) {
+    return new VectorTile.Feature(Poi.LAYER_NAME, 1, VectorTile.encodeGeometry(newPoint(x, y)), new HashMap<>(tags),
+      1);
+  }
 }

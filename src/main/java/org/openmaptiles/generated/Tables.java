@@ -843,7 +843,7 @@ public class Tables {
       and(matchAny("tourism", "information"), matchAny("information", "office", "visitor_centre")),
       and(matchField("shop"), not(matchAny("shop", "vacant", "unknown", "fixme", "yes"))),
       matchAny("waterway", "waterfall", "dock"),
-      matchAny("natural", "cave_entrance", "geyser", "spring", "hot_spring"),
+      matchAny("natural", "cave_entrance", "geyser", "spring", "hot_spring", "tree"),
       matchAny("zoo", "enclosure", "petting_zoo", "aviary", "wildlife_park", "birds", "safari_park", "butterfly",
         "falconry", "reptile", "terrarium"),
       matchAny("man_made", "adit", "windmill", "water_tower", "telescope", "lighthouse")),
