@@ -1535,8 +1535,8 @@ public class Tables {
       OsmRailwayLinestring.MAPPING),
     MultiExpression.entry(new RowClassAndConstructor(OsmAerialwayLinestring.class, OsmAerialwayLinestring::new),
       OsmAerialwayLinestring.MAPPING),
-    // MultiExpression.entry(new RowClassAndConstructor(OsmShipwayLinestring.class, OsmShipwayLinestring::new),
-    //   OsmShipwayLinestring.MAPPING),
+    MultiExpression.entry(new RowClassAndConstructor(OsmShipwayLinestring.class, OsmShipwayLinestring::new),
+      OsmShipwayLinestring.MAPPING),
     MultiExpression.entry(new RowClassAndConstructor(OsmHighwayPolygon.class, OsmHighwayPolygon::new),
       OsmHighwayPolygon.MAPPING),
     MultiExpression.entry(new RowClassAndConstructor(OsmHighwayPoint.class, OsmHighwayPoint::new),
@@ -1632,10 +1632,10 @@ public class Tables {
         result.computeIfAbsent(OsmAerialwayLinestring.class, cls -> new ArrayList<>())
           .add(new RowHandlerAndClass<>(typedHandler.getClass(), typedHandler::process));
       }
-      // if (handler instanceof OsmShipwayLinestring.Handler typedHandler) {
-      //   result.computeIfAbsent(OsmShipwayLinestring.class, cls -> new ArrayList<>())
-      //     .add(new RowHandlerAndClass<>(typedHandler.getClass(), typedHandler::process));
-      // }
+      if (handler instanceof OsmShipwayLinestring.Handler typedHandler) {
+        result.computeIfAbsent(OsmShipwayLinestring.class, cls -> new ArrayList<>())
+          .add(new RowHandlerAndClass<>(typedHandler.getClass(), typedHandler::process));
+      }
       if (handler instanceof OsmSkiLinestring.Handler typedHandler) {
         result.computeIfAbsent(OsmSkiLinestring.class, cls -> new ArrayList<>())
           .add(new RowHandlerAndClass<>(typedHandler.getClass(), typedHandler::process));
