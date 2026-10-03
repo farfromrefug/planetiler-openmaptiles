@@ -147,11 +147,13 @@ public class Poi implements
   private final Map<String, List<Tables.OsmPoiPoint>> aggStops = new HashMap<>();
   /*
    * Classes whose unnamed points are packed into one MultiPoint per tile: they come by the thousand
-   * (a city centre tile holds ~8k street trees), carry nothing but their class, and a style draws
-   * them all or none, so neither a feature each nor a rank buys anything. One feature per tile
-   * costs ~2.4 bytes a tree where a point each with a rank costs ~8.4.
+   * (a city centre tile holds ~8k street trees, rhone-alpes ~75k barriers, nearly all unnamed),
+   * carry nothing but their class, and a style draws them all or none, so neither a feature each
+   * nor a rank buys anything. One feature per tile costs ~2.4 bytes a tree where a point each with
+   * a rank costs ~8.4.
    */
-  private static final Set<String> MULTIPOINT_CLASSES = Set.of("tree");
+  private static final Set<String> MULTIPOINT_CLASSES = Set.of("tree",
+    "gate", "bollard", "lift_gate", "cycle_barrier", "stile", "toll_booth", "border_control", "sally_port");
   private final boolean trees;
 
   public Poi(Translations translations, PlanetilerConfig config, Stats stats) {

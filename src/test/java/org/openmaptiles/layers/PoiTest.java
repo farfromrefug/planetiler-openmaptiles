@@ -517,6 +517,20 @@ class PoiTest extends AbstractLayerTest {
     Assertions.assertEquals(1, toilets.tags().get("rank"));
   }
 
+  @Test
+  void testPacksUnnamedBarriers() throws GeometryException {
+    var result = profile.postProcessLayerFeatures(Poi.LAYER_NAME, 14, List.of(
+      treeAt(1, 1, Map.of("class", "gate")),
+      treeAt(2, 2, Map.of("class", "gate")),
+      treeAt(3, 3, Map.of("class", "bollard")),
+      treeAt(4, 4, Map.of("class", "gate", "name", "Porte de France"))
+    ));
+    Assertions.assertEquals(3, result.size(), result::toString);
+    var gates = result.stream().filter(f -> f.tags().equals(Map.of("class", "gate"))).findFirst().orElseThrow();
+    Assertions.assertEquals(2, gates.geometry().decode().getNumPoints());
+    Assertions.assertTrue(result.stream().anyMatch(f -> f.tags().equals(Map.of("class", "bollard"))));
+  }
+
   private VectorTile.Feature treeAt(double x, double y, Map<String, Object> tags) {
     return new VectorTile.Feature(Poi.LAYER_NAME, 1, VectorTile.encodeGeometry(newPoint(x, y)), new HashMap<>(tags),
       1);
