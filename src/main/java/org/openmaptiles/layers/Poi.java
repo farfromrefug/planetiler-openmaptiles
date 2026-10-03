@@ -50,6 +50,7 @@ import com.onthegomap.planetiler.config.PlanetilerConfig;
 import com.onthegomap.planetiler.expression.MultiExpression;
 import com.onthegomap.planetiler.geo.GeoUtils;
 import com.onthegomap.planetiler.geo.GeometryException;
+import com.onthegomap.planetiler.geo.GeometryType;
 import com.onthegomap.planetiler.reader.SimpleFeature;
 import com.onthegomap.planetiler.stats.Stats;
 import com.onthegomap.planetiler.util.Parse;
@@ -57,10 +58,13 @@ import com.onthegomap.planetiler.util.Translations;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.Consumer;
+import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Point;
 import org.openmaptiles.OpenMapTilesProfile;
 import org.openmaptiles.generated.OpenMapTilesSchema;
@@ -141,11 +145,26 @@ public class Poi implements
   private final Translations translations;
   private final Stats stats;
   private final Map<String, List<Tables.OsmPoiPoint>> aggStops = new HashMap<>();
+  /*
+   * Classes whose unnamed points are packed into one MultiPoint per tile: they come by the thousand
+   * (a city centre tile holds ~8k street trees, rhone-alpes ~75k barriers, nearly all unnamed),
+   * carry nothing but their class, and a style draws them all or none, so neither a feature each
+   * nor a rank buys anything. One feature per tile costs ~2.4 bytes a tree where a point each with
+   * a rank costs ~8.4.
+   */
+  private static final Set<String> MULTIPOINT_CLASSES = Set.of("tree",
+    "gate", "bollard", "lift_gate", "cycle_barrier", "stile", "toll_booth", "border_control", "sally_port");
+  private final boolean trees;
 
   public Poi(Translations translations, PlanetilerConfig config, Stats stats) {
     this.classMapping = FieldMappings.Class.index();
     this.translations = translations;
     this.stats = stats;
+    this.trees = config.arguments().getBoolean(
+      "poi_trees",
+      "poi layer: emit natural=tree from z14, unnamed ones packed into one MultiPoint per tile",
+      false
+    );
   }
 
   static int poiClassRank(String clazz,String subclazz) {
@@ -184,6 +203,16 @@ public class Poi implements
 
   @Override
   public void process(Tables.OsmPoiPoint element, FeatureCollector features) {
+    if ("tree".equals(element.subclass()) && "natural".equals(element.mappingKey())) {
+      if (trees) {
+        // class and name only: anything more would split the MultiPoint postProcess packs them into
+        features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+          .setAttr(Fields.CLASS, "tree")
+          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
+          .setMinZoom(14);
+      }
+      return;
+    }
     if (element.uicRef() != null && AGG_STOP_SUBCLASS_ORDER.contains(element.subclass())) {
       // multiple threads may update this concurrently
       String aggStopKey = element.uicRef()
@@ -371,10 +400,15 @@ public class Poi implements
   }
 
   @Override
-  public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
+  public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) throws GeometryException {
+    items = packMultiPoints(items);
     // infer the "rank" field from the order of features within each label grid square
     LongIntMap groupCounts = Hppc.newLongIntHashMap();
     for (VectorTile.Feature feature : items) {
+      if (isPacked(feature.tags().get(Fields.CLASS))) {
+        // a rank orders labels, and these have none
+        continue;
+      }
       int gridrank = groupCounts.getOrDefault(feature.group(), 1);
       groupCounts.put(feature.group(), gridrank + 1);
       if (!feature.tags().containsKey(Fields.RANK)) {
@@ -382,5 +416,82 @@ public class Poi implements
       }
     }
     return items;
+  }
+
+  /**
+   * Packs the unnamed points of {@link #MULTIPOINT_CLASSES} into one MultiPoint per class, ordered along a Z-order
+   * curve so that each point is a short delta from the one before it. A point sharing its exact position with
+   * another is dropped: it would draw on top of it.
+   */
+  private static List<VectorTile.Feature> packMultiPoints(List<VectorTile.Feature> items) throws GeometryException {
+    Map<Map<String, Object>, TreeSet<Long>> packs = null;
+    Map<Map<String, Object>, VectorTile.Feature> firsts = null;
+    List<VectorTile.Feature> result = items;
+    for (int i = 0; i < items.size(); i++) {
+      VectorTile.Feature feature = items.get(i);
+      var tags = feature.tags();
+      if (tags.size() != 1 || !isPacked(tags.get(Fields.CLASS)) ||
+        feature.geometry().geomType() != GeometryType.POINT) {
+        if (packs != null) {
+          result.add(feature);
+        }
+        continue;
+      }
+      if (packs == null) {
+        packs = new LinkedHashMap<>();
+        firsts = new HashMap<>();
+        result = new ArrayList<>(items.subList(0, i));
+      }
+      firsts.putIfAbsent(tags, feature);
+      var cells = packs.computeIfAbsent(tags, k -> new TreeSet<>());
+      for (Coordinate c : feature.geometry().decode().getCoordinates()) {
+        cells.add(mortonEncode(Math.round(c.x * PACK_SCALE) + PACK_OFFSET, Math.round(c.y * PACK_SCALE) + PACK_OFFSET));
+      }
+    }
+    if (packs == null) {
+      return items;
+    }
+    for (var entry : packs.entrySet()) {
+      Coordinate[] coords = new Coordinate[entry.getValue().size()];
+      int n = 0;
+      for (long cell : entry.getValue()) {
+        coords[n++] = new Coordinate((mortonDecode(cell) - PACK_OFFSET) / PACK_SCALE,
+          (mortonDecode(cell >>> 1) - PACK_OFFSET) / PACK_SCALE);
+      }
+      VectorTile.Feature first = firsts.get(entry.getKey());
+      result.add(new VectorTile.Feature(first.layer(), first.id(),
+        VectorTile.encodeGeometry(GeoUtils.JTS_FACTORY.createMultiPointFromCoords(coords)), entry.getKey(),
+        VectorTile.Feature.NO_GROUP));
+    }
+    return result;
+  }
+
+  private static boolean isPacked(Object poiClass) {
+    // Set.of throws on a null lookup
+    return poiClass != null && MULTIPOINT_CLASSES.contains(poiClass);
+  }
+
+  /* tile pixels to the 4096 extent the tile is encoded at, offset so a point in the buffer stays positive */
+  private static final double PACK_SCALE = 16;
+  private static final long PACK_OFFSET = 1 << 15;
+
+  private static long mortonEncode(long x, long y) {
+    return spread(x) | (spread(y) << 1);
+  }
+
+  private static long spread(long v) {
+    long r = 0;
+    for (int b = 0; b < 31; b++) {
+      r |= ((v >>> b) & 1L) << (2 * b);
+    }
+    return r;
+  }
+
+  private static long mortonDecode(long m) {
+    long r = 0;
+    for (int b = 0; b < 31; b++) {
+      r |= ((m >>> (2 * b)) & 1L) << b;
+    }
+    return r;
   }
 }
