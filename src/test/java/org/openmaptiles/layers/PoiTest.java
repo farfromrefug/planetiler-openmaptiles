@@ -531,6 +531,66 @@ class PoiTest extends AbstractLayerTest {
     Assertions.assertTrue(result.stream().anyMatch(f -> f.tags().equals(Map.of("class", "bollard"))));
   }
 
+  private FeatureCollector processWith(String flag, Map<String, Object> tags) {
+    var profile = new OpenMapTilesProfile(translations,
+      PlanetilerConfig.from(Arguments.of(Map.of(flag, "true"))), Stats.inMemory());
+    var feature = pointFeature(tags);
+    var collector = featureCollectorFactory.get(feature);
+    profile.processFeature(feature, collector);
+    return collector;
+  }
+
+  @Test
+  void testLandmarksOffByDefault() {
+    assertFeatures(14, List.of(), process(pointFeature(Map.of("power", "tower"))));
+    assertFeatures(14, List.of(), process(pointFeature(Map.of("historic", "wayside_cross"))));
+    assertFeatures(14, List.of(), process(pointFeature(Map.of("tourism", "information", "information", "guidepost"))));
+  }
+
+  @ParameterizedTest
+  @org.junit.jupiter.params.provider.CsvSource({
+    "power, tower, power_tower",
+    "aerialway, pylon, pylon",
+    "historic, wayside_cross, wayside_cross",
+    "historic, wayside_shrine, wayside_shrine",
+    "man_made, mast, mast",
+    "man_made, cross, cross",
+    "man_made, cairn, cairn",
+    "natural, stone, stone",
+    "natural, rock, rock",
+  })
+  void testLandmark(String key, String value, String clazz) {
+    assertFeatures(14, List.of(Map.of(
+      "_layer", "poi",
+      "class", clazz,
+      "subclass", "<null>",
+      "name", "Croix du Nivolet",
+      "_minzoom", 14
+    )), processWith("poi_landmarks", Map.of(key, value, "name", "Croix du Nivolet")));
+  }
+
+  @Test
+  void testWindTurbineOnlyAmongGenerators() {
+    assertFeatures(14, List.of(Map.of("class", "wind_turbine")),
+      processWith("poi_landmarks", Map.of("power", "generator", "generator:source", "wind")));
+    assertFeatures(14, List.of(),
+      processWith("poi_landmarks", Map.of("power", "generator", "generator:source", "solar")));
+  }
+
+  @Test
+  void testGuidepostLosesItsName() {
+    assertFeatures(14, List.of(Map.of(
+      "_layer", "poi",
+      "class", "guidepost",
+      "name", "<null>",
+      "_minzoom", 14
+    )), processWith("poi_guideposts",
+      Map.of("tourism", "information", "information", "guidepost", "name", "Col de la Charmette")));
+    // other information points are untouched by the flag
+    assertFeatures(14, List.of(Map.of("class", "information", "subclass", "office")),
+      processWith("poi_guideposts", Map.of("tourism", "information", "information", "office")));
+  }
+
   private VectorTile.Feature treeAt(double x, double y, Map<String, Object> tags) {
     return new VectorTile.Feature(Poi.LAYER_NAME, 1, VectorTile.encodeGeometry(newPoint(x, y)), new HashMap<>(tags),
       1);

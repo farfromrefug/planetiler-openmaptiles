@@ -786,7 +786,7 @@ public class Tables {
     }
 
     /** Imposm3 "mapping" to filter OSM elements that should appear in this "table". */
-    public static final Expression MAPPING = and(or(matchAny("aerialway", "station"),
+    public static final Expression MAPPING = and(or(matchAny("aerialway", "station", "pylon"),
       matchAny("amenity", "arts_centre", "bank", "bar", "biergarten",
         "bus_station", "cafe", "cinema", "clinic", "college", "community_centre", "courthouse", "dentist", "doctors",
         "drinking_water", "fast_food", "ferry_terminal", "fire_station", "food_court", "fountain", "fuel", "grave_yard",
@@ -799,7 +799,8 @@ public class Tables {
       matchAny("barrier", "border_control", "sally_port",
         "bollard", "cycle_barrier", "gate", "lift_gate", "stile", "toll_booth"),
       matchAny("building", "dormitory"), matchAny("highway", "bus_stop"),
-      matchAny("historic", "monument", "castle", "fort", "monastery", "archaeological_site", "ruins"),
+      matchAny("historic", "monument", "castle", "fort", "monastery", "archaeological_site", "ruins",
+        "wayside_cross", "wayside_shrine"),
       matchAny("landuse", "cemetery", "reservoir", "winter_sports", "basin"),
       matchAny("leisure", "adult_gaming_centre", "amusement_arcade", "bandstand", "bird_hide", "bowling_alley",
         "escape_game", "fitness_centre", "golf_course", "ice_rink", "hackerspace", "marina",
@@ -840,13 +841,14 @@ public class Tables {
       matchAny("tourism", "alpine_hut", "aquarium", "attraction", "bed_and_breakfast", "camp_site",
         "caravan_site", "chalet", "gallery", "guest_house", "hostel", "hotel", "motel", "museum",
         "theme_park", "wilderness_hut", "zoo", "picnic_site", "viewpoint"),
-      and(matchAny("tourism", "information"), matchAny("information", "office", "visitor_centre")),
+      and(matchAny("tourism", "information"), matchAny("information", "office", "visitor_centre", "guidepost")),
       and(matchField("shop"), not(matchAny("shop", "vacant", "unknown", "fixme", "yes"))),
       matchAny("waterway", "waterfall", "dock"),
-      matchAny("natural", "cave_entrance", "geyser", "spring", "hot_spring", "tree"),
+      matchAny("natural", "cave_entrance", "geyser", "spring", "hot_spring", "tree", "stone", "rock"),
       matchAny("zoo", "enclosure", "petting_zoo", "aviary", "wildlife_park", "birds", "safari_park", "butterfly",
         "falconry", "reptile", "terrarium"),
-      matchAny("man_made", "adit", "windmill", "water_tower", "telescope", "lighthouse")),
+      matchAny("man_made", "adit", "windmill", "water_tower", "telescope", "lighthouse", "mast", "cross", "cairn"),
+      matchAny("power", "tower", "generator")),
       matchType("point"));
 
     /**
