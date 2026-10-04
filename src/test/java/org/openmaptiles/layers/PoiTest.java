@@ -596,6 +596,31 @@ class PoiTest extends AbstractLayerTest {
       processWith("poi_guideposts", Map.of("tourism", "information", "information", "office")));
   }
 
+  @Test
+  void testDefaultRanksAreOpenMapTiles() {
+    assertFeatures(14, List.of(Map.of("class", "school", "_sortkey", 85)),
+      process(pointFeature(Map.of("amenity", "school", "name", "École Jean Jaurès"))));
+    assertFeatures(14, List.of(Map.of("class", "pharmacy", "_sortkey", 1_000)),
+      process(pointFeature(Map.of("amenity", "pharmacy", "name", "Pharmacie du Col"))));
+  }
+
+  @Test
+  void testCustomRanks() {
+    var profile = new OpenMapTilesProfile(translations,
+      PlanetilerConfig.from(Arguments.of(Map.of("poi_custom_ranks", "true"))), Stats.inMemory());
+    for (var c : List.of(
+      Map.<String, Object>of("amenity", "school", "name", "École Jean Jaurès", "_sortkey", 130),
+      Map.<String, Object>of("amenity", "pharmacy", "name", "Pharmacie du Col", "_sortkey", 101)
+    )) {
+      var tags = new HashMap<String, Object>(c);
+      int sortKey = (int) tags.remove("_sortkey");
+      var feature = pointFeature(tags);
+      var collector = featureCollectorFactory.get(feature);
+      profile.processFeature(feature, collector);
+      assertFeatures(14, List.of(Map.of("_sortkey", sortKey)), collector);
+    }
+  }
+
   private VectorTile.Feature treeAt(double x, double y, Map<String, Object> tags) {
     return new VectorTile.Feature(Poi.LAYER_NAME, 1, VectorTile.encodeGeometry(newPoint(x, y)), new HashMap<>(tags),
       1);
