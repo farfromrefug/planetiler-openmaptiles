@@ -152,9 +152,33 @@ public class Poi implements
    * nor a rank buys anything. One feature per tile costs ~2.4 bytes a tree where a point each with
    * a rank costs ~8.4.
    */
-  private static final Set<String> MULTIPOINT_CLASSES = Set.of("tree",
-    "gate", "bollard", "lift_gate", "cycle_barrier", "stile", "toll_booth", "border_control", "sally_port");
+  private static final Set<String> MULTIPOINT_CLASSES = Set.of("tree", "guidepost",
+    "gate", "bollard", "lift_gate", "cycle_barrier", "stile", "toll_booth", "border_control", "sally_port",
+    "power_tower", "pylon", "wayside_cross", "wayside_shrine", "mast", "cross", "cairn", "stone", "rock",
+    "wind_turbine");
+  /*
+   * Things that mark a spot on the ground rather than name one, drawn as a symbol from z14. Keyed by
+   * mapping key and subclass, valued by the class they come out as: the subclass alone collides
+   * (power=tower is not man_made=tower) or says nothing (aerialway=pylon).
+   */
+  private static final Map<String, String> LANDMARKS = Map.ofEntries(
+    entry("power=tower", "power_tower"),
+    entry("aerialway=pylon", "pylon"),
+    entry("historic=wayside_cross", "wayside_cross"),
+    entry("historic=wayside_shrine", "wayside_shrine"),
+    entry("man_made=mast", "mast"),
+    entry("man_made=cross", "cross"),
+    entry("man_made=cairn", "cairn"),
+    entry("natural=stone", "stone"),
+    entry("natural=rock", "rock")
+  );
+  /* tall enough to read the landscape by from z13, where everything else waits for z14 */
+  private static final Set<String> Z13_MARKERS = Set.of("power_tower", "wind_turbine");
+  /* mapped only to reach wind turbines: any other generator is dropped */
+  private static final String NOT_A_MARKER = "";
   private final boolean trees;
+  private final boolean landmarks;
+  private final boolean guideposts;
 
   public Poi(Translations translations, PlanetilerConfig config, Stats stats) {
     this.classMapping = FieldMappings.Class.index();
@@ -165,6 +189,42 @@ public class Poi implements
       "poi layer: emit natural=tree from z14, unnamed ones packed into one MultiPoint per tile",
       false
     );
+    this.landmarks = config.arguments().getBoolean(
+      "poi_landmarks",
+      "poi layer: emit power towers, aerialway pylons, masts, wind turbines, wayside crosses and shrines, " +
+        "crosses, cairns, stones and rocks from z14, unnamed ones packed into one MultiPoint per tile",
+      false
+    );
+    this.guideposts = config.arguments().getBoolean(
+      "poi_guideposts",
+      "poi layer: emit hiking guideposts from z14 without their name, packed into one MultiPoint per tile",
+      false
+    );
+  }
+
+  /** The class a marker comes out as, {@link #NOT_A_MARKER} for one never emitted, null for any other POI. */
+  private static String markerClass(Tables.OsmPoiPoint element) {
+    String key = element.mappingKey();
+    String subclass = element.subclass();
+    if ("natural".equals(key) && "tree".equals(subclass)) {
+      return "tree";
+    }
+    if ("tourism".equals(key) && "information".equals(subclass) && "guidepost".equals(element.information())) {
+      return "guidepost";
+    }
+    if ("power".equals(key) && "generator".equals(subclass)) {
+      return "wind".equals(element.source().getTag("generator:source")) ? "wind_turbine" : NOT_A_MARKER;
+    }
+    return LANDMARKS.get(key + "=" + subclass);
+  }
+
+  private boolean emits(String marker) {
+    return switch (marker) {
+      case NOT_A_MARKER -> false;
+      case "tree" -> trees;
+      case "guidepost" -> guideposts;
+      default -> landmarks;
+    };
   }
 
   static int poiClassRank(String clazz,String subclazz) {
@@ -203,13 +263,17 @@ public class Poi implements
 
   @Override
   public void process(Tables.OsmPoiPoint element, FeatureCollector features) {
-    if ("tree".equals(element.subclass()) && "natural".equals(element.mappingKey())) {
-      if (trees) {
+    String marker = markerClass(element);
+    if (marker != null) {
+      if (emits(marker)) {
         // class and name only: anything more would split the MultiPoint postProcess packs them into
-        features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
-          .setAttr(Fields.CLASS, "tree")
-          .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
-          .setMinZoom(14);
+        var feature = features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
+          .setAttr(Fields.CLASS, marker)
+          .setMinZoom(Z13_MARKERS.contains(marker) ? 13 : 14);
+        // a guidepost's name is the place it stands at, already on the map; dropping it packs them all
+        if (!"guidepost".equals(marker)) {
+          feature.putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations));
+        }
       }
       return;
     }
