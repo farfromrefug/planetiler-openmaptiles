@@ -93,7 +93,36 @@ public class Poi implements
    */
 
   private static final Logger LOGGER = LoggerFactory.getLogger(Poi.class);
+  /* OpenMapTiles' order, looked up by class */
   private static final Map<String, Integer> CLASS_RANKS = Map.ofEntries(
+    entry(FieldValues.CLASS_HOSPITAL, 20),
+    entry(FieldValues.CLASS_RAILWAY, 40),
+    entry(FieldValues.CLASS_BUS, 50),
+    entry(FieldValues.CLASS_ATTRACTION, 70),
+    entry(FieldValues.CLASS_HARBOR, 75),
+    entry(FieldValues.CLASS_COLLEGE, 80),
+    entry(FieldValues.CLASS_SCHOOL, 85),
+    entry(FieldValues.CLASS_STADIUM, 90),
+    entry("zoo", 95),
+    entry(FieldValues.CLASS_TOWN_HALL, 100),
+    entry(FieldValues.CLASS_CAMPSITE, 110),
+    entry(FieldValues.CLASS_CEMETERY, 115),
+    entry(FieldValues.CLASS_PARK, 120),
+    entry(FieldValues.CLASS_LIBRARY, 130),
+    entry("police", 135),
+    entry(FieldValues.CLASS_POST, 140),
+    entry(FieldValues.CLASS_GOLF, 150),
+    entry(FieldValues.CLASS_SHOP, 400),
+    entry(FieldValues.CLASS_GROCERY, 500),
+    entry(FieldValues.CLASS_FAST_FOOD, 600),
+    entry(FieldValues.CLASS_CLOTHING_STORE, 700),
+    entry(FieldValues.CLASS_BAR, 800)
+  );
+  /*
+   * Ours, behind --poi_custom_ranks: an outdoor map's order, where a pharmacy, drinking water or a
+   * bakery beats a school, and a viewpoint comes last. Looked up by subclass first, then class.
+   */
+  private static final Map<String, Integer> CUSTOM_CLASS_RANKS = Map.ofEntries(
     entry(FieldValues.CLASS_HOSPITAL, 20),
     entry(FieldValues.CLASS_RAILWAY, 40),
     entry(FieldValues.CLASS_BUS, 50),
@@ -179,6 +208,7 @@ public class Poi implements
   private final boolean trees;
   private final boolean landmarks;
   private final boolean guideposts;
+  private final boolean customRanks;
 
   public Poi(Translations translations, PlanetilerConfig config, Stats stats) {
     this.classMapping = FieldMappings.Class.index();
@@ -198,6 +228,11 @@ public class Poi implements
     this.guideposts = config.arguments().getBoolean(
       "poi_guideposts",
       "poi layer: emit hiking guideposts from z14 without their name, packed into one MultiPoint per tile",
+      false
+    );
+    this.customRanks = config.arguments().getBoolean(
+      "poi_custom_ranks",
+      "poi layer: order labels by our outdoor ranks, by subclass then class, instead of OpenMapTiles' by class",
       false
     );
   }
@@ -227,8 +262,10 @@ public class Poi implements
     };
   }
 
-  static int poiClassRank(String clazz,String subclazz) {
-    return CLASS_RANKS.getOrDefault(subclazz, CLASS_RANKS.getOrDefault(clazz, 1_000));
+  int poiClassRank(String clazz, String subclazz) {
+    return customRanks ?
+      CUSTOM_CLASS_RANKS.getOrDefault(subclazz, CUSTOM_CLASS_RANKS.getOrDefault(clazz, 1_000)) :
+      CLASS_RANKS.getOrDefault(clazz, 1_000);
   }
 
   private String poiClass(String subclass, String mappingKey) {
