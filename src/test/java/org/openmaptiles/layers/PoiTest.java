@@ -549,7 +549,6 @@ class PoiTest extends AbstractLayerTest {
 
   @ParameterizedTest
   @org.junit.jupiter.params.provider.CsvSource({
-    "power, tower, power_tower",
     "aerialway, pylon, pylon",
     "historic, wayside_cross, wayside_cross",
     "historic, wayside_shrine, wayside_shrine",
@@ -570,8 +569,14 @@ class PoiTest extends AbstractLayerTest {
   }
 
   @Test
+  void testPowerTowerFromZ13() {
+    assertFeatures(14, List.of(Map.of("class", "power_tower", "_minzoom", 13)),
+      processWith("poi_landmarks", Map.of("power", "tower")));
+  }
+
+  @Test
   void testWindTurbineOnlyAmongGenerators() {
-    assertFeatures(14, List.of(Map.of("class", "wind_turbine")),
+    assertFeatures(14, List.of(Map.of("class", "wind_turbine", "_minzoom", 13)),
       processWith("poi_landmarks", Map.of("power", "generator", "generator:source", "wind")));
     assertFeatures(14, List.of(),
       processWith("poi_landmarks", Map.of("power", "generator", "generator:source", "solar")));

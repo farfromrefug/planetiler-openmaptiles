@@ -172,6 +172,8 @@ public class Poi implements
     entry("natural=stone", "stone"),
     entry("natural=rock", "rock")
   );
+  /* tall enough to read the landscape by from z13, where everything else waits for z14 */
+  private static final Set<String> Z13_MARKERS = Set.of("power_tower", "wind_turbine");
   /* mapped only to reach wind turbines: any other generator is dropped */
   private static final String NOT_A_MARKER = "";
   private final boolean trees;
@@ -267,7 +269,7 @@ public class Poi implements
         // class and name only: anything more would split the MultiPoint postProcess packs them into
         var feature = features.point(LAYER_NAME).setBufferPixels(BUFFER_SIZE)
           .setAttr(Fields.CLASS, marker)
-          .setMinZoom(14);
+          .setMinZoom(Z13_MARKERS.contains(marker) ? 13 : 14);
         // a guidepost's name is the place it stands at, already on the map; dropping it packs them all
         if (!"guidepost".equals(marker)) {
           feature.putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations));
