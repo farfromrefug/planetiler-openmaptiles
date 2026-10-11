@@ -121,6 +121,19 @@ public class Landuse implements
     return clazz;
   }
 
+  /**
+   * The level of a polygon under the ground, else null: an underground car park lies under a square or a street, and
+   * drawn like a surface one it makes the square above read as a car park. Only these carry a {@code layer}.
+   */
+  private static Integer undergroundLayer(Tables.OsmLandusePolygon element) {
+    var source = element.source();
+    Integer layer = Parse.parseIntOrNull(source.getTag("layer"));
+    if (layer != null && layer < 0) {
+      return layer;
+    }
+    return "underground".equals(source.getTag("parking")) || "underground".equals(source.getTag("location")) ? -1 : null;
+  }
+
   @Override
   public void process(Tables.OsmLandusePolygon element, FeatureCollector features) {
     String clazz = getClass(element);
@@ -131,6 +144,10 @@ public class Landuse implements
         // .setMinPixelSizeFactor(2.5)
         // .setMinPixelSizeOverrides(MIN_PIXEL_SIZE_THRESHOLDS)
         .setMinZoom(Z6_CLASSES.contains(clazz) ? 6 : 9);
+        Integer underground = undergroundLayer(element);
+        if (underground != null) {
+          feature.setAttr("layer", underground);
+        }
         if (FieldValues.CLASS_RESIDENTIAL.equals(clazz)) {
           feature
             .setMinPixelSize(0.1)

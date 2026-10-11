@@ -68,6 +68,19 @@ class LanduseTest extends AbstractLayerTest {
   }
 
   @Test
+  void testUndergroundParkingKeepsItsLayer() {
+    assertFeatures(14, List.of(Map.of("_layer", "landuse", "class", "parking", "layer", -1)),
+      process(polygonFeature(Map.of("amenity", "parking", "parking", "underground"))));
+    assertFeatures(14, List.of(Map.of("_layer", "landuse", "class", "parking", "layer", -1)),
+      process(polygonFeature(Map.of("amenity", "parking", "location", "underground"))));
+    assertFeatures(14, List.of(Map.of("_layer", "landuse", "class", "parking", "layer", -2)),
+      process(polygonFeature(Map.of("amenity", "parking", "layer", "-2"))));
+    // a surface car park has no layer
+    assertFeatures(14, List.of(Map.of("_layer", "landuse", "class", "parking", "layer", "<null>")),
+      process(polygonFeature(Map.of("amenity", "parking", "parking", "surface"))));
+  }
+
+  @Test
   void testGraveYardBecomesCemetery() {
     assertFeatures(14, List.of(
       Map.of("_layer", "poi"),
