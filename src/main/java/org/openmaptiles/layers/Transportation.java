@@ -69,6 +69,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -201,6 +202,10 @@ public class Transportation implements
   private final boolean surfaceDetail;
   /** Lowest zoom carrying surface_detail. Defaults to 14, where the cost is worth paying. */
   private final int surfaceDetailMinzoom;
+  /** Emit cycleway_l, cycleway_r and shoulder; see {@link #cyclewayClass(SourceFeature, String)}. */
+  private final boolean cycleway;
+  /** Lowest zoom carrying cycleway_l, cycleway_r and shoulder. */
+  private final int cyclewayMinzoom;
 
   public Transportation(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
@@ -219,6 +224,16 @@ public class Transportation implements
       "transportation_surface_detail_minzoom",
       "transportation layer: lowest zoom carrying surface_detail",
       14
+    );
+    cycleway = config.arguments().getBoolean(
+      "transportation_cycleway",
+      "transportation layer: emit cycleway_l/cycleway_r (cycle infrastructure on the road, per side) and shoulder",
+      false
+    );
+    cyclewayMinzoom = config.arguments().getInteger(
+      "transportation_cycleway_minzoom",
+      "transportation layer: lowest zoom carrying cycleway_l, cycleway_r and shoulder",
+      13
     );
     MINZOOMS = Map.ofEntries(
       entry(FieldValues.CLASS_PATH, z13Paths ? 13 : 14),
@@ -258,6 +273,96 @@ public class Transportation implements
    */
   private String surfaceDetail(String value) {
     return surfaceDetail ? value : null;
+  }
+
+  private static final Set<String> CYCLEWAY_SHARED = Set.of("shared_lane", "share_busway", "shared");
+  private static final Set<String> CYCLEWAY_LANE = Set.of("lane", "buffered_lane", "exclusive", "advisory");
+  private static final Set<String> CYCLEWAY_TRACK = Set.of("track");
+  private static final Set<String> CYCLEWAY_SEPARATE = Set.of("separate", "use_sidepath");
+  /** Separations that physically keep a car out of the lane, as opposed to paint. */
+  private static final Set<String> CYCLEWAY_HARD_SEPARATION = Set.of("kerb", "bollard", "flex_post", "parking_lane",
+    "parking");
+  private static final Set<String> SHOULDER_VALUES = Set.of("yes", "both", "left", "right");
+  /** {@code maxspeed=none} (no limit, e.g. the autobahn) is stored as this value. */
+  static final int MAXSPEED_NONE = 255;
+
+  /**
+   * Returns {@code maxspeed} in km/h, mirroring Valhalla's {@code normalize_speed}: the integer prefix, converted from
+   * mph when the value ends in {@code mph}, and nothing below 10 (that is {@code walk}, typos and "5"). {@code a;b}
+   * keeps the first value and {@code none} becomes {@link #MAXSPEED_NONE}. Implicit values such as {@code FR:urban}
+   * have no number and are dropped.
+   * <p>
+   * This replaces {@code Parse.parseLong}, which dropped the unit: {@code 55 mph} came out as 55.
+   */
+  static Integer maxspeedKmh(Object tag) {
+    if (tag == null) {
+      return null;
+    }
+    String value = tag.toString().trim().toLowerCase(Locale.ROOT);
+    int semicolon = value.indexOf(';');
+    if (semicolon >= 0) {
+      value = value.substring(0, semicolon).trim();
+    }
+    if (value.equals("none")) {
+      return MAXSPEED_NONE;
+    }
+    int digits = 0;
+    while (digits < value.length() && value.charAt(digits) >= '0' && value.charAt(digits) <= '9') {
+      digits++;
+    }
+    if (digits == 0 || digits > 4) {
+      return null;
+    }
+    int speed = Integer.parseInt(value.substring(0, digits));
+    if (value.endsWith("mph")) {
+      speed = (int) Math.round(speed * 1.609344);
+    }
+    return speed < 10 ? null : speed;
+  }
+
+  /**
+   * Returns what cycle infrastructure the road itself has on {@code side} ({@code "left"} or {@code "right"}, relative
+   * to the line direction), or null when there is none:
+   * <ol>
+   * <li>1: shared lane markings or a bus lane open to bikes</li>
+   * <li>2: painted, advisory or buffered lane</li>
+   * <li>3: physically separated, either a {@code track} or a lane with a kerb, bollard, flex post or parking row</li>
+   * <li>4: the infrastructure is its own way ({@code separate}, {@code use_sidepath}), so none on this road</li>
+   * </ol>
+   * Precedence per side is {@code cycleway:<side>}, then {@code cycleway:both}, then {@code cycleway}; the first tag
+   * present decides, so {@code cycleway:left=no} blocks the fallback. {@code opposite*} values are ignored.
+   */
+  static Integer cyclewayClass(SourceFeature source, String side) {
+    Object tag = firstTag(source, "cycleway:" + side, "cycleway:both", "cycleway");
+    if (tag == null) {
+      return null;
+    }
+    String value = tag.toString();
+    if (CYCLEWAY_SHARED.contains(value)) {
+      return 1;
+    } else if (CYCLEWAY_LANE.contains(value)) {
+      Object separation = firstTag(source, "cycleway:" + side + ":separation", "cycleway:both:separation");
+      return separation != null && CYCLEWAY_HARD_SEPARATION.contains(separation.toString()) ? 3 : 2;
+    } else if (CYCLEWAY_TRACK.contains(value)) {
+      return 3;
+    } else if (CYCLEWAY_SEPARATE.contains(value)) {
+      return 4;
+    }
+    return null;
+  }
+
+  private static Object firstTag(SourceFeature source, String... keys) {
+    for (String key : keys) {
+      Object value = source.getTag(key);
+      if (value != null) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  private static Integer shoulder(Object tag) {
+    return tag != null && SHOULDER_VALUES.contains(tag.toString()) ? 1 : null;
   }
 
   /** Returns a value for {@code access} tag constrained to a small set of known values from raw OSM data. */
@@ -618,7 +723,7 @@ public class Transportation implements
           ((ZoomFunction<Integer>) z -> z < 9 ? null : z >= 12 ? rampAboveZ12 : rampBelowZ12))
         // z12+
         .setAttrWithMinzoom(Fields.SERVICE, service, 12)
-        .setAttrWithMinzoom("maxspeed", nullIfLong(element.source().getLong("maxspeed"), 0), 12)
+        .setAttrWithMinzoom("maxspeed", maxspeedKmh(element.source().getTag("maxspeed")), 12)
         .setAttrWithMinzoom(Fields.ONEWAY, nullIfInt(element.isOneway(), 0), 12)
         .setAttrWithMinzoom("construction",
           ((element.highway() != null && element.highway().equals("construction")) ||
@@ -627,6 +732,10 @@ public class Transportation implements
         .setAttrWithMinzoom(Fields.SURFACE, surface(highwayClass,coalesce(element.surface(), element.tracktype())), 12)
         .setAttrWithMinzoom("surface_detail",
           surfaceDetail(coalesce(element.surface(), element.tracktype())), surfaceDetailMinzoom)
+        .setAttrWithMinzoom("cycleway_l", cycleway ? cyclewayClass(element.source(), "left") : null, cyclewayMinzoom)
+        .setAttrWithMinzoom("cycleway_r", cycleway ? cyclewayClass(element.source(), "right") : null, cyclewayMinzoom)
+        .setAttrWithMinzoom("shoulder", cycleway ? shoulder(element.source().getTag("shoulder")) : null,
+          cyclewayMinzoom)
         .setMinPixelSize(0) // merge during post-processing, then limit by size
 
         // .setPixelTolerance(0)
@@ -834,10 +943,12 @@ public class Transportation implements
 
     // don't merge road segments with oneway tag
     // TODO merge preserving oneway instead ignoring
+    // The same goes for cycleway_l/cycleway_r: left and right depend on the line direction, which merging re-orients.
     int onewayId = 1;
     for (var item : items) {
       var oneway = item.tags().get(Fields.ONEWAY);
-      if (oneway instanceof Number n && ONEWAY_VALUES.contains(n.intValue())) {
+      boolean isOneway = oneway instanceof Number n && ONEWAY_VALUES.contains(n.intValue());
+      if (isOneway || item.tags().containsKey("cycleway_l") || item.tags().containsKey("cycleway_r")) {
         item.tags().put(LIMIT_MERGE_TAG, onewayId++);
       }
     }
