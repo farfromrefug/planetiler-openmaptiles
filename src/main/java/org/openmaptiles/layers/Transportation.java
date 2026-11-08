@@ -736,7 +736,10 @@ public class Transportation implements
         .setAttrWithMinzoom("cycleway_r", cycleway ? cyclewayClass(element.source(), "right") : null, cyclewayMinzoom)
         .setAttrWithMinzoom("shoulder", cycleway ? shoulder(element.source().getTag("shoulder")) : null,
           cyclewayMinzoom)
-        .setMinPixelSize(0) // merge during post-processing, then limit by size
+        // merge during post-processing, then limit by size. setMinPixelSize(0) alone leaves the max-zoom threshold
+        // (min_feature_size_at_max_zoom) in force, which silently deletes ways of a few metres - stair landings,
+        // 1 m footway stubs - and breaks the connectivity of the path network in the tiles.
+        .setMinPixelSizeAtAllZooms(0)
 
         // .setPixelTolerance(0)
         // .setMinPixelSizeFactor(0.2)
