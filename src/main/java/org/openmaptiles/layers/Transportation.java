@@ -202,9 +202,12 @@ public class Transportation implements
   private final boolean surfaceDetail;
   /** Lowest zoom carrying surface_detail. Defaults to 14, where the cost is worth paying. */
   private final int surfaceDetailMinzoom;
-  /** Emit cycleway_l, cycleway_r and shoulder; see {@link #cyclewayClass(SourceFeature, String)}. */
+  /**
+   * Emit cycleway_l, cycleway_r, shoulder and oneway_bicycle; see {@link #cyclewayClass(SourceFeature, String)} and
+   * {@link #onewayBicycle(SourceFeature)}.
+   */
   private final boolean cycleway;
-  /** Lowest zoom carrying cycleway_l, cycleway_r and shoulder. */
+  /** Lowest zoom carrying cycleway_l, cycleway_r, shoulder and oneway_bicycle. */
   private final int cyclewayMinzoom;
 
   public Transportation(Translations translations, PlanetilerConfig config, Stats stats) {
@@ -347,6 +350,24 @@ public class Transportation implements
       return 3;
     } else if (CYCLEWAY_SEPARATE.contains(value)) {
       return 4;
+    }
+    return null;
+  }
+
+  /**
+   * Returns {@code "no"} when bikes may ride a one-way way in both directions: {@code oneway:bicycle=no}, or an
+   * {@code opposite*} value on {@code cycleway}, {@code cycleway:left}, {@code cycleway:right} or
+   * {@code cycleway:both}. Null otherwise. The caller only asks for one-way ways.
+   */
+  static String onewayBicycle(SourceFeature source) {
+    if ("no".equals(source.getTag("oneway:bicycle"))) {
+      return "no";
+    }
+    for (String key : new String[] {"cycleway", "cycleway:left", "cycleway:right", "cycleway:both"}) {
+      Object value = source.getTag(key);
+      if (value != null && value.toString().startsWith("opposite")) {
+        return "no";
+      }
     }
     return null;
   }
@@ -736,6 +757,8 @@ public class Transportation implements
         .setAttrWithMinzoom("cycleway_r", cycleway ? cyclewayClass(element.source(), "right") : null, cyclewayMinzoom)
         .setAttrWithMinzoom("shoulder", cycleway ? shoulder(element.source().getTag("shoulder")) : null,
           cyclewayMinzoom)
+        .setAttrWithMinzoom("oneway_bicycle",
+          cycleway && element.isOneway() != 0 ? onewayBicycle(element.source()) : null, cyclewayMinzoom)
         // merge during post-processing, then limit by size. setMinPixelSize(0) alone leaves the max-zoom threshold
         // (min_feature_size_at_max_zoom) in force, which silently deletes ways of a few metres - stair landings,
         // 1 m footway stubs - and breaks the connectivity of the path network in the tiles.
