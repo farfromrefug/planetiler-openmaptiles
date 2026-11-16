@@ -124,6 +124,14 @@ public class TransportationName implements
   private final boolean sizeForShield;
   private final boolean limitMerge;
   private final PlanetilerConfig config;
+  /** Lowest zoom where lines keep their full geometry. */
+  private static final int FULL_DETAIL_MINZOOM = 14;
+  /** No simplification (collinear points only), so transportation and transportation_name keep the same vertices. */
+  private static final double FULL_DETAIL_TOLERANCE = 0;
+  /** Block lambda returning Double: a ternary mixing a double with null NPEs. */
+  private final ZoomFunction<Number> fullDetailTolerance =
+      (int zoom) -> zoom >= FULL_DETAIL_MINZOOM ? Double.valueOf(FULL_DETAIL_TOLERANCE) : null;
+  private final double toleranceAtMaxZoom;
   private final boolean minorRefs;
   private Transportation transportation;
   private final LongByteMap motorwayJunctionHighwayClasses = Hppc.newLongByteHashMap();
@@ -149,6 +157,8 @@ public class TransportationName implements
         "transportation_name_minor_refs",
         "transportation_name layer: include name and refs from minor road networks if not present on a way",
         false);
+    this.toleranceAtMaxZoom = config.maxzoomForRendering() >= FULL_DETAIL_MINZOOM ? FULL_DETAIL_TOLERANCE :
+        config.simplifyToleranceAtMaxZoom();
   }
 
   public void needsTransportationLayer(Transportation transportation) {
@@ -281,7 +291,7 @@ public class TransportationName implements
         .setAttr(Fields.CLASS, highwayClass)
         .setAttr(Fields.SUBCLASS, subclass)
         .setMinPixelSize(0)
-        .setPixelTolerance(0)
+        .setPixelToleranceAtAllZooms(0) // the max zoom has its own value, which builds may raise
         .setSortKey(element.zOrder())
         .setMinZoom(minzoom);
 
@@ -341,6 +351,8 @@ public class TransportationName implements
           .setAttr(Fields.CLASS, "aerialway")
           .setAttr(Fields.SUBCLASS, element.aerialway())
           .setMinPixelSize(0)
+          .setPixelToleranceOverrides(fullDetailTolerance)
+          .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
           .setSortKey(element.zOrder())
           .setMinZoom(12);
     }
@@ -355,6 +367,8 @@ public class TransportationName implements
         .putAttrs(OmtLanguageUtils.getNames(element.source().tags(), translations))
         .setAttr(Fields.CLASS, element.shipway())
         .setMinPixelSize(0)
+        .setPixelToleranceOverrides(fullDetailTolerance)
+        .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
         .setSortKey(element.zOrder())
         .setMinZoom(12);
     }
@@ -362,7 +376,9 @@ public class TransportationName implements
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) {
-    double tolerance = config.tolerance(zoom);
+    // from FULL_DETAIL_MINZOOM nothing is simplified, whatever simplify_tolerance(_at_max_zoom) say
+    // -1 skips the merge simplification altogether
+    double tolerance = zoom >= FULL_DETAIL_MINZOOM ? -1 : config.tolerance(zoom);
     double minLength = coalesce(MIN_LENGTH.apply(zoom), 0).doubleValue();
     // TODO tolerances:
     // z6: (tolerance: 500)

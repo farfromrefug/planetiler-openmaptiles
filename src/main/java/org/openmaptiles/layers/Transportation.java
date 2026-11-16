@@ -188,6 +188,17 @@ public class Transportation implements
   private static final Set<Integer> ONEWAY_VALUES = Set.of(-1, 1);
   private final Map<String, Integer> MINZOOMS;
   private static final String LIMIT_MERGE_TAG = "__limit_merge";
+  /** Lowest zoom where lines keep their full geometry: no simplification beyond the max zoom tolerance. */
+  private static final int FULL_DETAIL_MINZOOM = 14;
+  /** No simplification (collinear points only), so transportation and transportation_name keep the same vertices. */
+  private static final double FULL_DETAIL_TOLERANCE = 0;
+  /**
+   * Per-feature simplification tolerance for lines. The max zoom has its own value, but when rendering
+   * past z14 the zooms in between would fall back to the coarse default (0.45px) and visibly cut corners
+   * of roads and paths. NOTE: block lambda returning Double - a ternary mixing a double with null NPEs.
+   */
+  private final ZoomFunction<Number> fullDetailTolerance;
+  private final double toleranceAtMaxZoom;
   private final AtomicBoolean loggedNoGb = new AtomicBoolean(false);
   private final AtomicBoolean loggedNoIreland = new AtomicBoolean(false);
   private final boolean z13Paths;
@@ -213,6 +224,11 @@ public class Transportation implements
   public Transportation(Translations translations, PlanetilerConfig config, Stats stats) {
     this.config = config;
     this.stats = stats;
+    fullDetailTolerance = (int zoom) -> zoom >= FULL_DETAIL_MINZOOM ? Double.valueOf(FULL_DETAIL_TOLERANCE) : null;
+    // the max zoom ignores the overrides above and has its own value, which the simplify_tolerance_at_max_zoom
+    // build option can raise well past one tile unit (cairn builds use 0.25)
+    toleranceAtMaxZoom = config.maxzoomForRendering() >= FULL_DETAIL_MINZOOM ? FULL_DETAIL_TOLERANCE :
+      config.simplifyToleranceAtMaxZoom();
     z13Paths = config.arguments().getBoolean(
       "transportation_z13_paths",
       "transportation(_name) layer: show all paths on z13",
@@ -763,6 +779,8 @@ public class Transportation implements
         // (min_feature_size_at_max_zoom) in force, which silently deletes ways of a few metres - stair landings,
         // 1 m footway stubs - and breaks the connectivity of the path network in the tiles.
         .setMinPixelSizeAtAllZooms(0)
+        .setPixelToleranceOverrides(fullDetailTolerance)
+        .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
 
         // .setPixelTolerance(0)
         // .setMinPixelSizeFactor(0.2)
@@ -892,6 +910,8 @@ public class Transportation implements
         .setAttrWithMinzoom(Fields.LAYER, nullIfLong(element.layer(), 0), 9)
         .setSortKey(element.zOrder())
         .setMinPixelSize(0) // merge during post-processing, then limit by size
+        .setPixelToleranceOverrides(fullDetailTolerance)
+        .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
         .setMinZoom(minzoom);
     }
   }
@@ -908,6 +928,8 @@ public class Transportation implements
       .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
       .setSortKey(element.zOrder())
       .setMinPixelSize(0) // merge during post-processing, then limit by size
+      .setPixelToleranceOverrides(fullDetailTolerance)
+      .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
       .setMinZoom(12);
   }
 
@@ -922,6 +944,8 @@ public class Transportation implements
       .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
       .setSortKey(element.zOrder())
       .setMinPixelSize(0) // merge during post-processing, then limit by size
+      .setPixelToleranceOverrides(fullDetailTolerance)
+      .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
       .setMinZoom(4)
       .setMinPixelSizeBelowZoom(10, 32); // `sql_filter: ST_Length(...)` used in OpenMapTiles translates to 32px
   }
@@ -936,6 +960,8 @@ public class Transportation implements
       .setAttr(Fields.LAYER, nullIfLong(element.layer(), 0))
       .setSortKey(element.zOrder())
       .setMinPixelSize(0) // merge during post-processing, then limit by size
+      .setPixelToleranceOverrides(fullDetailTolerance)
+      .setPixelToleranceAtMaxZoom(toleranceAtMaxZoom)
       .setMinZoom(14);
   }
 
@@ -963,7 +989,9 @@ public class Transportation implements
 
   @Override
   public List<VectorTile.Feature> postProcess(int zoom, List<VectorTile.Feature> items) throws GeometryException {
-    double tolerance = config.tolerance(zoom) * 0.5;
+    // from FULL_DETAIL_MINZOOM nothing is simplified, whatever simplify_tolerance(_at_max_zoom) say
+    // -1 skips the merge simplification altogether
+    double tolerance = zoom >= FULL_DETAIL_MINZOOM ? -1 : config.tolerance(zoom) * 0.5;
     double minFeatureSize = config.minFeatureSize(zoom);
     double minLength = coalesce(MIN_LENGTH.apply(zoom), 0).doubleValue();
 
